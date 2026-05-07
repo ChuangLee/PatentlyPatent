@@ -11,15 +11,18 @@ import { useFilesStore } from '@/stores/files';
 import { useAuthStore } from '@/stores/auth';
 import AgentChatStream from '@/components/chat/AgentChatStream.vue';
 import FilePreviewer from '@/components/workbench/FilePreviewer.vue';
+import MiniChatView from '@/components/chat/MiniChatView.vue';
 import ReadonlyBanner from '@/components/common/ReadonlyBanner.vue';
 import { disclosureApi } from '@/api/disclosure';
 import { message } from 'ant-design-vue';
+import { useUIStore } from '@/stores/ui';
 import type { Project, ProjectStatus, FileNode } from '@/types';
 
 const route = useRoute();
 const chat = useChatStore();
 const files = useFilesStore();
 const auth = useAuthStore();
+const ui = useUIStore();
 
 const project = ref<Project | null>(null);
 const round = ref(1);
@@ -105,6 +108,15 @@ function onRoundComplete() {
   >
     <template #extra>
       <a-button
+        v-if="project"
+        :type="ui.workbenchSplitView ? 'primary' : 'default'"
+        :ghost="ui.workbenchSplitView"
+        :class="{ 'pp-split-btn-active': chat.streaming }"
+        @click="ui.toggleWorkbenchSplitView"
+      >
+        📑 {{ ui.workbenchSplitView ? '关闭 split view' : '切 split view' }}
+      </a-button>
+      <a-button
         v-if="!isReadonly && project"
         type="primary"
         :loading="generating"
@@ -140,9 +152,20 @@ function onRoundComplete() {
       />
     </div>
 
-    <!-- 右：文件预览 -->
-    <div class="pp-pane pp-pane-right">
-      <FilePreviewer />
+    <!-- 右：文件预览（split view 时上半 mini chat / 下半预览）-->
+    <div
+      class="pp-pane pp-pane-right"
+      :class="{ 'pp-pane-right-split': ui.workbenchSplitView }"
+    >
+      <template v-if="ui.workbenchSplitView">
+        <div class="pp-pane-split-top">
+          <MiniChatView :tail="8" />
+        </div>
+        <div class="pp-pane-split-bottom">
+          <FilePreviewer />
+        </div>
+      </template>
+      <FilePreviewer v-else />
     </div>
   </div>
 </template>
@@ -166,6 +189,32 @@ function onRoundComplete() {
   min-width: 0;
 }
 .pp-pane-right { min-width: 380px; }
+.pp-pane-right-split {
+  display: grid;
+  grid-template-rows: 1fr 1fr;
+  gap: 0;
+}
+.pp-pane-split-top {
+  border-bottom: 1px solid #eee;
+  min-height: 0;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+.pp-pane-split-bottom {
+  min-height: 0;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+.pp-split-btn-active {
+  box-shadow: 0 0 0 2px rgba(22, 119, 255, 0.25);
+  animation: pp-split-glow 1.6s ease-in-out infinite;
+}
+@keyframes pp-split-glow {
+  0%, 100% { box-shadow: 0 0 0 2px rgba(22, 119, 255, 0.25); }
+  50% { box-shadow: 0 0 0 4px rgba(22, 119, 255, 0.45); }
+}
 
 @media (max-width: 1280px) {
   .pp-workbench-grid {

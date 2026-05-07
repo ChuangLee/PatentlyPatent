@@ -97,3 +97,27 @@ title: PatentlyPatent 迭代日志
 - 后端 chat handler 加"基于已生成的 md 上下文"系统提示（让用户回答能上下文连贯）
 - 智慧芽再加 most_cited 占位文献（往背景技术对比表里填）
 
+
+## v0.11 · 2026-05-08 01:50 · split view + chat 上下文 + most_cited graceful + 拖拽 hover
+
+**调研**
+- 智慧芽 most_cited 端点实测：套餐未开通（67200203 "API need a true rate!"）→ 改 graceful 占位
+- 4 件 ROI: A 中 / B+C+D 小，全部并行
+
+**实现**（subagent A + 主流程 B+C+D）
+- A. (subagent) split view: 新建 MiniChatView.vue（最近 8 条对话只读+流式自动滚），ProjectWorkbench 右栏 split mode 时分上下 50/50（mini chat + FilePreviewer），按钮在 #extra slot 流式时高亮闪烁；ui store 加 workbenchSplitView 持久化
+- B. backend chat.py 系统提示注入：拼入 'AI 输出/' 下前 8 个 md 文件各前 600 字到 sys_prompt，让对话基于已生成章节回答；提示 LLM 末尾"✅ 建议归档"总结
+- C. zhihuiya.most_cited 接入 research，套餐失败时 graceful：warnings 含 most_cited 时输出"ℹ️ Top 高被引文献需智慧芽套餐升级"提示
+- D. FileTree 拖拽 hover 反馈：dragOverKey ref + onDragEnter/Leave/End；目标 folder 节点加 .pp-drag-over class（黄色虚线边框 + 米白底）
+
+**测试**
+- pnpm test 35/35 / build / vue-tsc 严格无错
+- 公网 e2e：auto-mining 流 740 行 / 01-背景技术.md 末尾出现"Top 高被引需套餐升级"提示
+- chat 上下文 e2e：56 events 正常 SSE 流
+
+**下轮目标 (v0.12)**
+- 项目卡片在 sidebar 显示进度（圆环或徽章）
+- 流式生成中加暂停/取消按钮
+- 后端按 fileNode.parentId 收集"我的资料/"下用户上传的文件作 chat 上下文
+- 更细的拖拽视觉：hover 持续高亮（目前 dragenter 后切到别的 folder 才更新）
+

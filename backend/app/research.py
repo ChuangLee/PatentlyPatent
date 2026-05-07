@@ -4,7 +4,7 @@
 from __future__ import annotations
 import re
 from typing import Iterable
-from .zhihuiya import query_search_count, applicant_ranking, patent_trends, ZhihuiyaError
+from .zhihuiya import query_search_count, applicant_ranking, patent_trends, most_cited, ZhihuiyaError
 
 # 中文停用词（极简）
 _CN_STOP = set("的了和与或者一个一种本是在为以及或将其能可对于即不"
@@ -100,6 +100,12 @@ async def quick_landscape(description: str, title: str = "") -> dict:
             except Exception as e:
                 out["trends"] = []
                 out.setdefault("warnings", []).append(f"trends: {e}")
+            # v0.11-C: most_cited 套餐多数情况未开（67200203），graceful fallback
+            try:
+                out["most_cited"] = await most_cited(total_q, lang="cn", n=5)
+            except Exception as e:
+                out["most_cited"] = []
+                out.setdefault("warnings", []).append(f"most_cited unavailable (套餐): {e}")
     except Exception as e:
         out["error"] = f"{type(e).__name__}: {e}"
     return out
@@ -146,6 +152,25 @@ def landscape_to_md(landscape: dict) -> str:
             f"{rows_t}\n\n"
         )
 
+    # v0.11-C: top 5 高被引专利（套餐未开时为空，仅显示提示）
+    cited = landscape.get("most_cited") or []
+    cited_md = ""
+    if cited:
+        cited_rows = "\n".join(
+            f"| {i+1} | `{c.get('patent_number', '—')}` | {(c.get('title', '—') or '—')[:50]} | {c.get('cited_count', 0)} |"
+            for i, c in enumerate(cited[:5])
+        )
+        cited_md = (
+            "\n### Top 5 高被引专利（候选最近现有技术 D1）\n\n"
+            "| # | 公开号 | 标题（截断） | 被引数 |\n|---|---|---|---|\n"
+            f"{cited_rows}\n\n"
+            "> 这 5 篇是候选 D1，建议代理人重点对照。\n\n"
+        )
+    else:
+        warns = landscape.get("warnings", [])
+        if any("most_cited" in w for w in warns):
+            cited_md = "\n> ℹ️ Top 高被引文献需智慧芽套餐升级；当前已串通其他 insights。\n\n"
+
     return (
         "## 🔍 智慧芽快速洞察（自动生成）\n\n"
         f"**抽取的检索关键词**：{kw_str}\n\n"
@@ -154,6 +179,7 @@ def landscape_to_md(landscape: dict) -> str:
         f"| **综合 (`{landscape.get('total_query','')}`) | **{landscape.get('total_count', 0):,}** |\n"
         f"{apps_md}"
         f"{trends_md}"
+        f"{cited_md}"
         "> 上述命中量为智慧芽全库搜索结果（标题+摘要+权要+说明书）。"
         "数量越大说明该方向竞争越激烈，需更细化区别特征。\n\n"
     )

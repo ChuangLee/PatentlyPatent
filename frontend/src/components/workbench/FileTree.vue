@@ -228,7 +228,26 @@ type DropInfo = {
   dropPosition: number;
 };
 
+// v0.11-D: 拖拽过程的目标 key（高亮文件夹）
+const dragOverKey = ref<string | null>(null);
+
+function onDragEnter(info: { node: { key: string | number; dataRef?: { isLeaf?: boolean } } }) {
+  const k = String(info.node.key);
+  // 只高亮 folder 节点
+  const node = files.getNode(k);
+  dragOverKey.value = node?.kind === 'folder' ? k : null;
+}
+
+function onDragLeave() {
+  // a-tree 的 dragLeave 节流不稳，统一在 drop/dragEnd 清掉
+}
+
+function onDragEnd() {
+  dragOverKey.value = null;
+}
+
 function onDrop(info: DropInfo) {
+  dragOverKey.value = null;
   const dragId = String(info.dragNode.key);
   const targetId = String(info.node.key);
   const target = files.getNode(targetId);
@@ -335,10 +354,11 @@ function renderNodeTitle(node: AntdTreeNode) {
   const raw = node.raw;
   const icon = iconFor(raw);
   const cnt = raw.kind === 'folder' ? childCount(raw) : 0;
+  const isDragTarget = dragOverKey.value === raw.id && raw.kind === 'folder';
   return h(
     'span',
     {
-      class: 'pp-tree-node',
+      class: ['pp-tree-node', isDragTarget ? 'pp-drag-over' : ''].filter(Boolean).join(' '),
       onContextmenu: (e: MouseEvent) => {
         e.preventDefault();
         contextNodeId.value = raw.id;
@@ -423,13 +443,16 @@ function renderNodeTitle(node: AntdTreeNode) {
             :expanded-keys="expandedKeys"
             :checkable="checkable"
             :checked-keys="checkedKeys"
-            :class="{ 'pp-tree-wrap': wrapNames }"
+            :class="{ 'pp-tree-wrap': wrapNames, 'pp-tree-dragging': dragOverKey !== null }"
             block-node
             draggable
             @select="onSelect"
             @expand="onExpand"
             @check="onCheck"
             @drop="onDrop"
+            @dragenter="onDragEnter"
+            @dragleave="onDragLeave"
+            @dragend="onDragEnd"
           >
             <template #title="node">
               <component :is="renderNodeTitle(node as AntdTreeNode)" />
@@ -479,6 +502,17 @@ function renderNodeTitle(node: AntdTreeNode) {
 .pp-active {
   background: #e6f0ff !important;
   color: #1677ff !important;
+}
+/* 拖拽过程：当前文件夹高亮 */
+.pp-drag-over {
+  background: #fff7e6 !important;
+  border: 2px dashed #faad14 !important;
+  border-radius: 4px;
+  padding: 0 4px;
+}
+.pp-tree-dragging {
+  /* 拖拽进行中给整个 tree 一点提示 */
+  cursor: grabbing;
 }
 /* 多行显示：节点 title 换行 */
 :deep(.pp-tree-wrap .ant-tree-node-content-wrapper) {
