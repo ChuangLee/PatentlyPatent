@@ -4,7 +4,7 @@
 from __future__ import annotations
 import re
 from typing import Iterable
-from .zhihuiya import query_search_count, ZhihuiyaError
+from .zhihuiya import query_search_count, applicant_ranking, patent_trends, ZhihuiyaError
 
 # 中文停用词（极简）
 _CN_STOP = set("的了和与或者一个一种本是在为以及或将其能可对于即不"
@@ -74,13 +74,13 @@ async def quick_landscape(description: str, title: str = "") -> dict:
 
     try:
         # 单关键词 count
-        for kw in keywords[:3]:  # 不超 3 个，避免限速
+        for kw in keywords[:3]:
             try:
-                cnt = await query_search_count(f"TACD:{kw}")
+                cnt = await query_search_count(f'TACD:"{kw}"')
                 out["queries"].append((kw, cnt))
             except ZhihuiyaError:
                 out["queries"].append((kw, -1))
-        # 综合 count
+        # 综合
         total_q = _cql(keywords[:3])
         out["total_query"] = total_q
         try:
@@ -88,28 +88,72 @@ async def quick_landscape(description: str, title: str = "") -> dict:
             out["available"] = True
         except ZhihuiyaError as e:
             out["error"] = str(e)
+        # 加 insights：top 申请人 + 趋势（基于综合 query）
+        if out["available"] and total_q:
+            try:
+                out["top_applicants"] = await applicant_ranking(total_q, lang="cn", n=8)
+            except Exception as e:
+                out["top_applicants"] = []
+                out.setdefault("warnings", []).append(f"applicants: {e}")
+            try:
+                out["trends"] = await patent_trends(total_q, lang="cn")
+            except Exception as e:
+                out["trends"] = []
+                out.setdefault("warnings", []).append(f"trends: {e}")
     except Exception as e:
         out["error"] = f"{type(e).__name__}: {e}"
     return out
 
 
 def landscape_to_md(landscape: dict) -> str:
-    """把 quick_landscape 结果格式化为 markdown 段落，可插入到 01-背景技术.md 顶部"""
+    """把 quick_landscape 结果格式化为 markdown 段落"""
     if not landscape.get("available"):
         err = landscape.get("error", "智慧芽未开通")
         return f"> ℹ️ 智慧芽快速洞察未跑通（{err}）；下方仍按模板提供占位\n\n"
 
     kw_str = ", ".join(landscape.get("keywords", [])[:5])
     rows = "\n".join(
-        f"| `TACD:{kw}` | {('—' if cnt < 0 else f'{cnt:,}')} |"
+        f"| `TACD:\"{kw}\"` | {('—' if cnt < 0 else f'{cnt:,}')} |"
         for kw, cnt in landscape.get("queries", [])
     )
+
+    # 申请人 top 8
+    apps = landscape.get("top_applicants") or []
+    apps_md = ""
+    if apps:
+        apps_rows = "\n".join(
+            f"| {i+1} | {a.get('applicant', '?')} | {a.get('count', 0):,} | {(a.get('percentage', 0)*100):.1f}% |"
+            for i, a in enumerate(apps[:8])
+        )
+        apps_md = (
+            "\n### Top 申请人（来自智慧芽 insights）\n\n"
+            "| # | 申请人 | 公开数 | 占比 |\n|---|---|---|---|\n"
+            f"{apps_rows}\n\n"
+        )
+
+    # 趋势：最近 5 年
+    trends = landscape.get("trends") or []
+    trends_md = ""
+    if trends:
+        recent = sorted(trends, key=lambda t: int(t.get("year", 0)))[-7:]
+        rows_t = "\n".join(
+            f"| {t.get('year', '?')} | {t.get('application', 0):,} | {t.get('granted', 0):,} | {(t.get('percentage', 0)*100):.0f}% |"
+            for t in recent
+        )
+        trends_md = (
+            "\n### 申请趋势（最近 7 年，来自智慧芽 insights）\n\n"
+            "| 年份 | 申请数 | 授权数 | 授权率 |\n|---|---|---|---|\n"
+            f"{rows_t}\n\n"
+        )
+
     return (
         "## 🔍 智慧芽快速洞察（自动生成）\n\n"
         f"**抽取的检索关键词**：{kw_str}\n\n"
         "| 检索式 | 命中量 |\n|---|---|\n"
         f"{rows}\n"
-        f"| **综合 (`{landscape.get('total_query','')}`) | **{landscape.get('total_count', 0):,}** |\n\n"
+        f"| **综合 (`{landscape.get('total_query','')}`) | **{landscape.get('total_count', 0):,}** |\n"
+        f"{apps_md}"
+        f"{trends_md}"
         "> 上述命中量为智慧芽全库搜索结果（标题+摘要+权要+说明书）。"
-        "数量越大，说明该方向竞争越激烈，需更细化区别特征。\n\n"
+        "数量越大说明该方向竞争越激烈，需更细化区别特征。\n\n"
     )
