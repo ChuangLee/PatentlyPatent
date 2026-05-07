@@ -71,3 +71,29 @@ title: PatentlyPatent 迭代日志
 - 流式过程把已答内容显示在右栏 split view（文件预览 + 章节高亮）
 - 智慧芽 query 命中数（TACD:"xxx" count=0 问题）改用 ALL: 字段实测
 
+
+## v0.10 · 2026-05-08 00:40 · 文件树多选 + Tiptap 编辑写回 + 智慧芽 query 修复
+
+**调研**
+- ROI: A 多选(30min) / B Tiptap(45min) / C 智慧芽 query 修(15min) / D split view(60+min 留下轮)
+- 智慧芽实测发现 2 bug：
+  1. 响应字段是 `total_search_result_count` 不是 `count` → query_search_count 永远返 0
+  2. `TACD: TI: ALL:` 等字段前缀 syntax error → 必须用 plain 关键字
+  3. hyphen（如 `Kyber-512`）也 syntax error → 关键词抽取去 hyphen
+
+**实现**（subagent B + 主流程 A+C 并行）
+- A. files store 加 `removeMany(ids[])`；FileTree.vue 新工具栏按钮 `☐/🗑×N`：第一次点开多选模式，后续点击触发批量删；树加 `:checkable`/`:checked-keys`/`@check`
+- B. (subagent) FilePreviewer.vue markdown 加编辑模式：textarea + 实时 marked 预览左右分栏；保存调 PATCH /files/:fid 写库 + 更新 store
+- C. backend: zhihuiya.py query_search_count 改读 total_search_result_count；research.py 关键词抽取去 hyphen，CQL 改 plain 关键字 OR 拼接
+
+**测试**
+- pnpm test 35/35 / build 通过 / vue-tsc 严格无错
+- 公网真智慧芽：`/search/count?q=Kyber` → 2,248；`SIMD` → 120,042；综合 3.8M
+- e2e auto-mining：01-背景技术.md 含真 Kyber 2,248 / SIMD 120,042 / 8 个真申请人 / 7 年趋势
+
+**下轮目标 (v0.11)**
+- D. split view（流式过程同时显示对话+正在生成的文件预览）
+- 文件树拖拽到文件夹的视觉 hover 反馈
+- 后端 chat handler 加"基于已生成的 md 上下文"系统提示（让用户回答能上下文连贯）
+- 智慧芽再加 most_cited 占位文献（往背景技术对比表里填）
+

@@ -107,6 +107,19 @@ export const useFilesStore = defineStore('files', () => {
     persist();
   }
 
+  /** 批量删 — 收集所有 id 的后代 id 一起从树移除 */
+  function removeMany(ids: string[]): number {
+    const all = new Set<string>();
+    for (const id of ids) {
+      for (const did of descendantIds(tree.value, id)) all.add(did);
+    }
+    const before = tree.value.length;
+    tree.value = tree.value.filter(n => !all.has(n.id));
+    if (currentFileId.value && all.has(currentFileId.value)) currentFileId.value = null;
+    persist();
+    return before - tree.value.length;
+  }
+
   function writeContent(id: string, content: string) {
     const n = findById(tree.value, id);
     if (!n || n.kind !== 'file') return;
@@ -126,7 +139,7 @@ export const useFilesStore = defineStore('files', () => {
 
   return {
     projectId, tree, showHidden, currentFileId, currentNode,
-    visibleRoots, children, getNode, breadcrumb,
+    visibleRoots, children, getNode, breadcrumb, removeMany,
     attach, selectFile, addFile, addFolder, pushNode,
     rename, move, remove, writeContent, toggleHidden, reset,
   };

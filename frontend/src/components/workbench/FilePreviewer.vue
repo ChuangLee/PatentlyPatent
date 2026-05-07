@@ -3,7 +3,13 @@
  * 文件预览器 — 根据 useFilesStore().currentNode 渲染不同 mime 类型
  */
 import { computed, ref, watch } from 'vue';
-import { Button as AButton, Empty as AEmpty, Spin as ASpin } from 'ant-design-vue';
+import {
+  Button as AButton,
+  Empty as AEmpty,
+  Spin as ASpin,
+  Textarea as ATextarea,
+  message,
+} from 'ant-design-vue';
 import { marked } from 'marked';
 import { useFilesStore } from '@/stores/files';
 import { apiClient } from '@/api/client';
@@ -82,6 +88,59 @@ const renderedMd = computed<string>(() => {
   // marked 在某些版本同步返回 string，按同步处理
   return marked.parse(c, { async: false }) as string;
 });
+
+// ---- markdown 编辑模式 ----
+const editing = ref(false);
+const editingDraft = ref('');
+const saving = ref(false);
+
+/** 编辑模式实时预览（基于 draft） */
+const editingRenderedMd = computed<string>(() => {
+  return marked.parse(editingDraft.value ?? '', { async: false }) as string;
+});
+
+function enterEdit() {
+  if (!node.value || node.value.kind !== 'file' || node.value.mime !== 'text/markdown') return;
+  editingDraft.value = node.value.content ?? '';
+  editing.value = true;
+}
+
+function cancelEdit() {
+  editing.value = false;
+  editingDraft.value = '';
+}
+
+async function saveEdit() {
+  const n = node.value;
+  if (!n || n.kind !== 'file' || n.mime !== 'text/markdown') return;
+  const pid = files.projectId;
+  if (!pid) {
+    message.error('未关联项目，无法保存');
+    return;
+  }
+  saving.value = true;
+  try {
+    const content = editingDraft.value ?? '';
+    await apiClient.patch(`/projects/${pid}/files/${n.id}`, { content });
+    files.writeContent(n.id, content);
+    message.success('已保存');
+    editing.value = false;
+  } catch (e: any) {
+    console.error('[md-save]', e);
+    message.error('保存失败：' + (e?.message || '未知错误'));
+  } finally {
+    saving.value = false;
+  }
+}
+
+// 切换文件时自动退出编辑模式
+watch(
+  () => node.value?.id,
+  () => {
+    editing.value = false;
+    editingDraft.value = '';
+  },
+);
 
 function fmtBytes(n?: number): string {
   if (n == null) return '-';
@@ -167,7 +226,28 @@ function downloadAsFile(n: FileNode) {
         </div>
 
         <!-- markdown -->
-        <div v-else-if="node.mime === 'text/markdown'" class="preview-md" v-html="renderedMd" />
+        <div v-else-if="node.mime === 'text/markdown'" class="pp-md-wrap">
+          <div class="pp-md-toolbar">
+            <template v-if="!editing">
+              <AButton size="small" @click="enterEdit">✏️ 编辑</AButton>
+            </template>
+            <template v-else>
+              <AButton size="small" type="primary" :loading="saving" @click="saveEdit">💾 保存</AButton>
+              <AButton size="small" :disabled="saving" @click="cancelEdit">↩️ 取消</AButton>
+              <span class="pp-md-tip">左侧编辑 raw markdown，右侧实时预览</span>
+            </template>
+          </div>
+          <div v-if="!editing" class="preview-md" v-html="renderedMd" />
+          <div v-else class="pp-md-edit">
+            <ATextarea
+              v-model:value="editingDraft"
+              class="pp-md-textarea"
+              :auto-size="false"
+              spellcheck="false"
+            />
+            <div class="preview-md pp-md-livepreview" v-html="editingRenderedMd" />
+          </div>
+        </div>
 
         <!-- 图片 -->
         <div v-else-if="node.mime && node.mime.startsWith('image/')" style="text-align:center;padding:16px">
@@ -279,11 +359,61 @@ function downloadAsFile(n: FileNode) {
 }
 .pp-folder-row:hover { background: #f5f5f5; }
 
+.pp-md-wrap {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+}
+.pp-md-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 12px;
+  border-bottom: 1px solid #f0f0f0;
+  background: #fafafa;
+  flex-shrink: 0;
+}
+.pp-md-tip {
+  margin-left: 8px;
+  color: #999;
+  font-size: 12px;
+}
+.pp-md-edit {
+  flex: 1;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  min-height: 0;
+  overflow: hidden;
+}
+.pp-md-textarea {
+  border: none !important;
+  border-right: 1px solid #f0f0f0 !important;
+  border-radius: 0 !important;
+  resize: none !important;
+  height: 100% !important;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace !important;
+  font-size: 13px !important;
+  line-height: 1.6 !important;
+  padding: 12px 14px !important;
+  box-shadow: none !important;
+  background: #fcfcfc;
+}
+.pp-md-textarea:focus {
+  box-shadow: none !important;
+  border-right: 1px solid #1677ff !important;
+}
+.pp-md-livepreview {
+  overflow: auto;
+  background: #fff;
+}
+
 .preview-md {
   padding: 16px 20px;
   font-size: 14px;
   line-height: 1.7;
   color: #1f2937;
+  overflow: auto;
 }
 .preview-md :deep(h1),
 .preview-md :deep(h2),

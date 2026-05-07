@@ -32,9 +32,10 @@ async def _request(method: str, path: str, json: dict | None = None, params: dic
 
 
 async def query_search_count(query: str) -> int:
-    """任意检索式命中量（POST）"""
+    """任意检索式命中量（POST）— 智慧芽返回字段为 total_search_result_count，兼容老 SDK 文档的 count"""
     body = await _request("POST", "/search/patent/query-search-count", json={"query_text": query})
-    return int(body.get("data", {}).get("count", 0))
+    data = body.get("data", {}) or {}
+    return int(data.get("total_search_result_count", data.get("count", 0)))
 
 
 async def patent_trends(query: str, lang: str = "cn") -> list[dict]:

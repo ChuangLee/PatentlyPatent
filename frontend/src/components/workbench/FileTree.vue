@@ -33,10 +33,43 @@ defineProps<{ projectId: string }>();
 
 const files = useFilesStore();
 const wrapNames = ref(false);   // 多行 / 单行
+const checkable = ref(false);   // 多选模式
 
 // 选中节点（用于"在选中文件夹下创建/上传"）
 const selectedKeys = ref<string[]>([]);
 const expandedKeys = ref<string[]>([]);
+const checkedKeys = ref<string[]>([]);   // 多选模式下的勾选 keys
+
+function onCheck(keys: any) {
+  // a-tree check 事件返 keys 数组（或对象，看 checkStrictly）
+  checkedKeys.value = Array.isArray(keys) ? keys.map(String) : (keys.checked || []).map(String);
+}
+
+function toggleCheckable() {
+  checkable.value = !checkable.value;
+  if (!checkable.value) checkedKeys.value = [];
+}
+
+function batchDelete() {
+  const ids = checkedKeys.value.filter(id => {
+    const n = files.getNode(id);
+    return n && n.parentId !== null;  // 不允许删根目录
+  });
+  if (ids.length === 0) {
+    message.info('请先勾选要删除的文件 / 文件夹（根目录不可删）');
+    return;
+  }
+  AModal.confirm({
+    title: `确认批量删除 ${ids.length} 项？`,
+    content: '将连同子项一并删除，无法恢复。',
+    okText: '全部删除', okType: 'danger', cancelText: '取消',
+    onOk() {
+      const removed = files.removeMany(ids);
+      checkedKeys.value = [];
+      message.success(`已删除 ${removed} 项`);
+    },
+  });
+}
 
 /** 根节点默认全展开 */
 function ensureRootsExpanded() {
@@ -347,6 +380,15 @@ function renderNodeTitle(node: AntdTreeNode) {
           <template #icon><DeleteOutlined /></template>
         </AButton>
       </ATooltip>
+      <ATooltip :title="checkable ? `批量删（已勾选 ${checkedKeys.length} 项）` : '开启多选模式（每节点出 checkbox，可批量删）'">
+        <AButton type="text" size="small"
+                 :class="{ 'pp-active': checkable }"
+                 @click="checkable && checkedKeys.length ? batchDelete() : toggleCheckable()">
+          <template #icon>
+            <span style="font-size:12px">{{ checkable ? `🗑×${checkedKeys.length}` : '☐' }}</span>
+          </template>
+        </AButton>
+      </ATooltip>
       <ATooltip title="刷新（从缓存重载）">
         <AButton type="text" size="small" @click="refreshTree">
           <template #icon><ReloadOutlined /></template>
@@ -379,11 +421,14 @@ function renderNodeTitle(node: AntdTreeNode) {
             :tree-data="treeData"
             :selected-keys="selectedKeys"
             :expanded-keys="expandedKeys"
+            :checkable="checkable"
+            :checked-keys="checkedKeys"
             :class="{ 'pp-tree-wrap': wrapNames }"
             block-node
             draggable
             @select="onSelect"
             @expand="onExpand"
+            @check="onCheck"
             @drop="onDrop"
           >
             <template #title="node">
@@ -430,6 +475,10 @@ function renderNodeTitle(node: AntdTreeNode) {
   gap: 2px;
   padding: 4px 6px;
   border-bottom: 1px solid #eee;
+}
+.pp-active {
+  background: #e6f0ff !important;
+  color: #1677ff !important;
 }
 /* 多行显示：节点 title 换行 */
 :deep(.pp-tree-wrap .ant-tree-node-content-wrapper) {
