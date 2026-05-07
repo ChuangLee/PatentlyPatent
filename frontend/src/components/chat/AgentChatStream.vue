@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { ref, watch, nextTick } from 'vue';
 import { useChatStore } from '@/stores/chat';
+import { useFilesStore } from '@/stores/files';
 import { chatApi } from '@/api/chat';
 import { Button, Input } from 'ant-design-vue';
 
@@ -8,6 +9,7 @@ const props = defineProps<{ projectId: string; round: number }>();
 const emit = defineEmits<{ (e: 'roundComplete', captured: string[]): void }>();
 
 const chat = useChatStore();
+const files = useFilesStore();
 const input = ref('');
 const containerRef = ref<HTMLElement | null>(null);
 
@@ -29,11 +31,27 @@ async function send() {
     else if (e.type === 'fields') {
       chat.applyFields(e.captured);
       emit('roundComplete', e.captured);
+    } else if (e.type === 'file') {
+      // AI 在文件树上 spawn 文件
+      files.pushNode(e.node);
     } else if (e.type === 'done') {
       chat.endAgent();
     }
   });
 }
+
+/** 由父组件（ProjectWorkbench）调，进入工作台时自动跑挖掘流程 */
+async function autoMine(ctx: Parameters<typeof chatApi.autoMine>[1]) {
+  if (chat.streaming) return;
+  chat.startAgent();
+  await chatApi.autoMine(props.projectId, ctx, e => {
+    if (e.type === 'delta') chat.appendDelta(e.chunk);
+    else if (e.type === 'file') files.pushNode(e.node);
+    else if (e.type === 'done') chat.endAgent();
+  });
+}
+
+defineExpose({ autoMine });
 </script>
 
 <template>
