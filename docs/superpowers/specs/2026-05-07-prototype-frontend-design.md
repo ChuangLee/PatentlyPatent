@@ -27,9 +27,10 @@ patent_king/                    # GitHub: ChuangLee/PatentlyPatent
 
 ## 0. 目的与范围
 
-目的：交付一个**纯前端 mid-fi 交互原型**，部署在 `https://blind.pub/patent/`，让员工/IP reviewer/admin 三种角色能完整走完"创新报门 → agent 引导 → 检索报告 → 交底书 → reviewer 审阅"的产品故事，作为对标方案给老板/客户/早期用户演示。
+目的：交付一个**纯前端 mid-fi 交互原型**，部署在 `https://blind.pub/patent/`，让 **员工** 与 **管理员** 两种角色完整走完"员工创新报门 → agent 引导 → 检索报告 → 交底书 → 提交存档 / 管理员看到全量分布"的产品故事，作为对标方案给老板/客户/早期用户演示。
 
 非目的（明确不做）：
+- 不做"审阅师 / IP reviewer 角色及审阅流程"（admin 只看不审；提交后由 IP 部门**线下处理**）
 - 不真起后端、不调真 LLM API、不接智慧芽真实数据
 - 不做用户注册/真密码登录（演示用一键切角色按钮）
 - 不做权限粒度精细化（前端 mock RBAC 即可）
@@ -37,7 +38,8 @@ patent_king/                    # GitHub: ChuangLee/PatentlyPatent
 - 不做 docx 真导出（按钮只 toast）
 
 成功标准：
-- 任意访问者打开 `https://blind.pub/patent/login`，1 分钟内能体验完员工全流程；3 分钟内能从员工切到 reviewer 看到流转后审阅页面；admin 总览页 30 秒内能看到全量项目分布
+- 任意访问者打开 `https://blind.pub/patent/login`，1 分钟内能体验完员工全流程
+- 切到管理员，30 秒内看到全量项目分布饼图与 3 个不同状态的 demo 项目
 - 流式对话视感与真 LLM 流式无异（按字符 chunk + 25-60ms 节奏）
 - 无任何后端依赖，nginx 静态部署即可
 
@@ -46,7 +48,7 @@ patent_king/                    # GitHub: ChuangLee/PatentlyPatent
 | 维度 | 决策 |
 |---|---|
 | 保真度 | mid-fi 交互原型，Mock Service Worker 拦截 fetch |
-| 故事 | 双角色完整闭环（员工 + IP reviewer + admin），约 10 页 |
+| 故事 | 双角色（员工 + 管理员），员工走完整 4 阶段流程，管理员只读看分布与详情，**约 8 页** |
 | 起手模板 | Soybean Admin v1.x，AntD Vue 4.x 分支 |
 | Demo 数据 | 3 个领域完整 case：密码学 / 信息安全 / AI |
 | 流式 | 前端伪流式（MSW 返 SSE chunked，按 token 子串延迟释放） |
@@ -66,7 +68,7 @@ patently-prototype/                # 独立子目录，前端原型
 │   ├── mock/                      # MSW handlers + 3 个 demo case fixtures
 │   │   ├── handlers/              # auth/projects/chat/search/disclosure
 │   │   ├── fixtures/
-│   │   │   ├── case_crypto.ts     # 密码学 case
+│   │   │   │   ├── case_crypto.ts     # 密码学 case
 │   │   │   ├── case_infosec.ts    # 信息安全 case
 │   │   │   └── case_ai.ts         # AI case
 │   │   └── browser.ts             # MSW worker 启动
@@ -90,71 +92,59 @@ patently-prototype/                # 独立子目录，前端原型
 | 用 json-server 起本地 mock 服务 | 多了一个进程，nginx 静态站不可达；MSW 跑在浏览器内最干净 |
 | 不用模板从零起 | 浪费 2-3 天写 layout/侧栏/面包屑/主题；Soybean 已经包好 |
 
-## 3. 路由清单（10 页）
+## 3. 路由清单（8 页）
 
 base = `/patent/`
 
 | # | 路径 | 页面名 | 谁能进 | 用途 |
 |---|---|---|---|---|
-| 1 | `/login` | 登录页 | 公开 | 一键切角色（员工/reviewer/admin） |
+| 1 | `/login` | 登录页 | 公开 | 一键切角色（员工 / 管理员） |
 | 2 | `/employee/dashboard` | 员工工作台 | 员工 | 项目卡片墙 + "+新建报门" |
 | 3 | `/employee/projects/new` | 创建报门 | 员工 | 标题+描述+领域 |
 | 4 | `/employee/projects/:id/mining` | Agent 引导对话 | 员工 | 流式对话 + 实时要素面板 |
 | 5 | `/employee/projects/:id/search` | 检索报告 | 员工 | 4 档结论 + 命中文献 |
-| 6 | `/employee/projects/:id/disclosure` | 交底书编辑 | 员工 | Tiptap + 三档独权切换器 |
-| 7 | `/reviewer/inbox` | reviewer 收件箱 | reviewer | 待审项目列表 |
-| 8 | `/reviewer/projects/:id/review` | reviewer 审阅页 | reviewer | 交底书+批注侧栏+状态切换 |
-| 9 | `/admin/dashboard` | admin 总览 | admin | 项目分布饼图 + 配额条 |
-| 10 | `/admin/projects` | 全量项目 | admin | 全部项目表格+多维过滤 |
+| 6 | `/employee/projects/:id/disclosure` | 交底书编辑 | 员工 | Tiptap + 三档独权切换器 + "提交存档" |
+| 7 | `/admin/dashboard` | 管理员总览 | 管理员 | 项目分布饼图 + 配额条 + 部门 top |
+| 8 | `/admin/projects` | 全量项目 | 管理员 | 全部项目表格+多维过滤；点行入只读详情 |
 | - | `/403` `/404` | 兜底 | — | 越权/未找到 |
 
 ### 公共骨架
 - Soybean Admin 默认壳（顶栏 logo + 用户菜单 + 角色徽章；侧栏按角色动态菜单；面包屑沿 router meta）
-- 项目状态机（含转换条件）：
+- **简化的项目状态机（无审阅环节）**：
 
 ```
-drafting ──[创建提交]──→ researching ──[mining 完成]──→ reporting
-                                                            │
-                       ┌──[reviewer 退回补充]──[员工提交]──┘
-                       │                              │
-                       ↓                              ↓
-                  drafting ←──────────────────── submitted
-                                                       │
-                                                  [reviewer 看]
-                                                       ↓
-                                                  reviewing
-                                            ┌──────────┼──────────┐
-                                       [批准]      [退回补充]   [拒绝]
-                                            ↓          ↓          ↓
-                                       approved   drafting    rejected
+drafting ──[报门提交]──→ researching ──[mining 完成]──→ reporting ──[员工点提交存档]──→ submitted (终态)
+   ↑                                                                                       │
+   └────────[员工"取消提交，回退编辑"按钮]──────────────────────────────────────────────────┘
 ```
-对应路径 3→4→5→6→submit→7→8。"退回补充"使状态回到 `drafting`，员工可重启对话/检索/编辑。
+
+**3 种状态**：`drafting` / `researching` / `reporting` / `submitted`（实际 4 种枚举但 reporting 与 submitted 之间是显式员工动作，无 reviewer 介入）。
+管理员看到 submitted 项目，**不做流转操作**——交由 IP 部门线下走传统专利申请流程。
 
 ### 角色权限（前端 mock RBAC）
 
 ```ts
 // stores/auth.ts
-type Role = 'employee' | 'reviewer' | 'admin';
+type Role = 'employee' | 'admin';
 
 const RBAC: Record<Role, RegExp[]> = {
   employee: [/^\/patent\/employee\//],
-  reviewer: [
-    /^\/patent\/reviewer\//,
-    /^\/patent\/employee\/projects\/.*\/(disclosure|search)$/,  // 复用员工 readonly 视图
+  admin: [
+    /^\/patent\/admin\//,
+    /^\/patent\/employee\/projects\/.*\/(disclosure|search|mining)$/,  // 复用员工只读视图查看任意项目
   ],
-  admin: [/^\/patent\/admin\//, /^\/patent\/(employee|reviewer)\//],
 };
 ```
 
-登录页一键切角色（无密码、纯演示），切完 Pinia 持久化到 localStorage。
+登录页一键切角色（员工 / 管理员，无密码、纯演示），切完 Pinia 持久化到 localStorage。
+管理员访问员工子路径时 UI 应自动切换为 readonly 模式（隐藏编辑按钮、提交按钮等）。
 
 ## 4. 数据模型
 
 ```ts
 // types/index.ts
-export type Role = 'employee' | 'reviewer' | 'admin';
-export type ProjectStatus = 'drafting' | 'researching' | 'reporting'
-                          | 'submitted' | 'reviewing' | 'approved' | 'rejected';
+export type Role = 'employee' | 'admin';
+export type ProjectStatus = 'drafting' | 'researching' | 'reporting' | 'submitted';
 export type Domain = 'cryptography' | 'infosec' | 'ai' | 'other';
 export type Patentability = 'strong' | 'moderate' | 'weak' | 'not_recommended';
 export type ClaimTier = 'broad' | 'medium' | 'narrow';
@@ -171,13 +161,11 @@ export interface Project {
   description: string;
   status: ProjectStatus;
   ownerId: string;
-  reviewerId?: string;
   createdAt: string;
   updatedAt: string;
   miningSummary?: MiningSummary;
   searchReport?: SearchReport;
   disclosure?: Disclosure;
-  reviewerNotes?: ReviewerNote[];
 }
 
 export interface MiningSummary {
@@ -221,24 +209,17 @@ export interface Disclosure {
   embodiments: string;
   bodyMarkdown: string;
 }
-
-export interface ReviewerNote {
-  id: string; reviewerId: string; ts: string;
-  anchor: { section: string; offset?: number };
-  comment: string;
-  type: 'suggest' | 'block' | 'praise';
-}
 ```
 
 ## 5. 三个 Demo Case 内容
 
-| Case | 标题 | 报门一句话 | 4 档结论 | reviewer 流转 |
-|---|---|---|---|---|
-| **🔐 密码学** | 一种基于 Kyber-512 NTT 并行优化的轻量级 PQC KEM 实现 | NIST 后量子标准 Kyber 的 NTT 子运算做了通道并行+向量化，嵌入式 ARM Cortex-M4 上密钥封装快了 38%。 | **moderate** | 待审 reviewing，2 条批注（D1 区别要写清；补 Falcon-512、Dilithium-2 同台 latency 对照） |
-| **🛡️ 信息安全** | 一种基于多信号融合行为基线的 API 网关异常请求检测方法与系统 | 在企业 API 网关里把统计 z-score + 梯度提升 ML + 滑动窗口自适应阈值三路信号融合，做账号纬度异常调用检测，误报率低 40%。 | **strong** | 已通过 approved，1 条 reviewer 嘉奖批注（建议在权要 6 增加'用户可解释性'相关从权） |
-| **🤖 AI** | 一种基于 KV-cache 分页与请求级动态调度的大模型推理批处理方法 | KV-cache 分页 + 优先级请求调度，单 GPU 提升大模型推理吞吐 2.3 倍。 | **weak** | 退回补充 rejected→drafting，2 条批注（vLLM PagedAttention SOSP'23 已公开作为独权将被 X 类破新颖；建议聚焦到非首推用户场景下的优先级调度） |
+| Case | 标题 | 报门一句话 | 4 档结论 | 当前状态 | 演示价值 |
+|---|---|---|---|---|---|
+| **🔐 密码学** | 一种基于 Kyber-512 NTT 并行优化的轻量级 PQC KEM 实现 | NIST 后量子标准 Kyber 的 NTT 子运算做了通道并行+向量化，嵌入式 ARM Cortex-M4 上密钥封装快了 38%。 | **moderate** | submitted | 中等价值案例：员工已提交，IP 部门线下评估中 |
+| **🛡️ 信息安全** | 一种基于多信号融合行为基线的 API 网关异常请求检测方法与系统 | 在企业 API 网关里把统计 z-score + 梯度提升 ML + 滑动窗口自适应阈值三路信号融合，做账号纬度异常调用检测，误报率低 40%。 | **strong** | submitted | 高价值案例：员工已提交，admin 看板"高潜力"标记 |
+| **🤖 AI** | 一种基于 KV-cache 分页与请求级动态调度的大模型推理批处理方法 | KV-cache 分页 + 优先级请求调度，单 GPU 提升大模型推理吞吐 2.3 倍。 | **weak** | drafting | **核心反例**：员工自查发现 vLLM 已公开 → 留作草稿不提交。**演示工具帮员工省下白忙活的痛点价值** |
 
-每个 case 预置完整数据：报门描述 + 5 轮对话 + 8 篇命中文献（公开号真实存在，摘要+对照表为编造，页面角标"演示数据"）+ 4 档结论 + 三档独权 + 完整说明书五段骨架 + reviewer 批注。
+每个 case 预置完整数据：报门描述 + 5 轮对话 + 8 篇命中文献（公开号真实存在，摘要+对照表为编造，页面角标"演示数据"）+ 4 档结论 + 三档独权 + 完整说明书五段骨架（drafting case 也有，因为员工已经走到 disclosure 页才决定不提交）。
 
 ### Mock 文献库分布（共 24 条）
 
@@ -253,9 +234,9 @@ export interface ReviewerNote {
 ```ts
 const DEMO_USERS = [
   { id: 'u1', name: '张工程师', role: 'employee', department: '研发-AI 平台部' },
-  { id: 'u2', name: '李审阅师', role: 'reviewer', department: '研发-AI 平台部' },
-  { id: 'u3', name: '王管理员', role: 'admin', department: 'IP 总部' },
+  { id: 'u2', name: '王管理员', role: 'admin',    department: 'IP 总部' },
 ];
+// 三个 demo project 的 ownerId = u1
 ```
 
 ## 6. 关键交互细节
@@ -312,17 +293,16 @@ http.post('/api/projects/:id/chat', async ({ params, request }) => {
 
 - 三档独权切换器（Radio.Group）：强(7±2)/中(9±2)/弱(11±2)，切换后 summary 段自动重写
 - 左编辑右预览，工具栏：H1-H3、Bold/Italic、列表、表格、代码块、自定义"实施例块"
-- 操作：[← 重新生成本节] [复制 markdown] [导出 docx (占位)] [提交 IP 部门]
-- "导出 docx"：toast"v0.2 支持，已下载占位 .docx 文件"
-- "提交 IP 部门" → 调 mock POST `/api/projects/:id/submit`，状态变 `submitted`
+- 操作：[← 重新生成本节] [复制 markdown] [导出 docx (占位)] [提交存档]
+- "导出 docx"：toast "v0.2 支持，已下载占位 .docx 文件"
+- "提交存档" → 调 mock POST `/api/projects/:id/submit`，状态变 `submitted`，toast "已提交至 IP 部门，将由专员线下处理"
+- 已 submitted 项目页：员工可见 [取消提交，回退编辑] 按钮（demo 演示用）
 
-### 6.5 Reviewer 审阅页
+### 6.5 管理员视图（admin/dashboard + admin/projects）
 
-- 项目元信息条（提交人/部门/时间/结论）
-- 主区交底书内容（只读）+ 右侧批注侧栏
-- 批注高亮原文段落（hover 气泡，点击高亮+滚动）
-- 底部操作：[退回补充] [拒绝] [批准 ✓]
-- 提交后 toast"已通知员工"
+- **dashboard**：项目数/状态分布饼图（drafting/researching/reporting/submitted 四档）+ 4 档专利性结论分布柱状图 + 部门 top10 + 智慧芽配额条 + LLM token 用量条
+- **全量项目**：表格（标题/员工/部门/领域/状态/结论/提交时间）+ 多维过滤；行点击进员工同样的 disclosure/search 页面但顶部贴红色 "只读 (admin 视角)" 警示条，所有"提交"/"编辑"按钮隐藏
+- **不做**：批注、审阅、流转操作
 
 ### 6.6 RBAC 路由守卫
 
@@ -468,11 +448,10 @@ curl -sS https://blind.pub/patent/ | grep -c '<div id="app"'  # >= 1
 
 ## 9. 验收
 
-- [ ] 三个 demo case 全跑通：员工 → 报门 → mining(伪流式) → search(4 档结论 + 文献表) → disclosure(三档独权切换 + Tiptap) → submit
+- [ ] 员工角色：3 个 demo case 全跑通 — 报门 → mining(伪流式) → search(4 档结论 + 文献表) → disclosure(三档独权切换 + Tiptap) → 密码学/信息安全两 case 提交存档；AI case 看到 weak 后留草稿
 - [ ] 流式对话视感与真 LLM 流式无明显差异
-- [ ] reviewer 角色：能看到密码学 case 待审、信息安全 case 已通过、AI case 退回；能批注、改状态
-- [ ] admin 角色：能看到 3 个项目分布的饼图和 reviewer 流转
-- [ ] 三种角色一键切换，受 RBAC 路由守卫保护，越权跳 403
+- [ ] 管理员角色：dashboard 看到 3 个项目状态/结论分布；admin/projects 表格能筛能排；点击进员工页变只读模式
+- [ ] 两种角色一键切换，受 RBAC 路由守卫保护，越权跳 403
 - [ ] 部署 `https://blind.pub/patent/` 可访问，刷新不 404
 - [ ] MSW worker 注册成功（DevTools Application / Service Workers 看见）
 - [ ] 移动端简单适配（Soybean 默认）
