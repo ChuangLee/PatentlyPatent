@@ -10,7 +10,6 @@ import { useChatStore } from '@/stores/chat';
 import { useFilesStore } from '@/stores/files';
 import { useAuthStore } from '@/stores/auth';
 import AgentChatStream from '@/components/chat/AgentChatStream.vue';
-import FileTree from '@/components/workbench/FileTree.vue';
 import FilePreviewer from '@/components/workbench/FilePreviewer.vue';
 import ReadonlyBanner from '@/components/common/ReadonlyBanner.vue';
 import type { Project, ProjectStatus } from '@/types';
@@ -99,12 +98,7 @@ function onRoundComplete() {
   </a-page-header>
 
   <div class="pp-workbench-grid">
-    <!-- 左：文件树 -->
-    <div class="pp-pane pp-pane-left">
-      <FileTree v-if="project" :project-id="project.id" />
-    </div>
-
-    <!-- 中：聊天 -->
+    <!-- 左：聊天 -->
     <div class="pp-pane pp-pane-mid">
       <AgentChatStream
         v-if="project"
@@ -124,7 +118,7 @@ function onRoundComplete() {
 <style scoped>
 .pp-workbench-grid {
   display: grid;
-  grid-template-columns: 300px 1fr 440px;
+  grid-template-columns: 1fr 480px;
   gap: 12px;
   height: calc(100vh - 260px);
   min-height: 480px;
@@ -139,17 +133,16 @@ function onRoundComplete() {
   flex-direction: column;
   min-width: 0;
 }
-.pp-pane-left { min-width: 260px; }
-.pp-pane-right { min-width: 360px; }
+.pp-pane-right { min-width: 380px; }
 
 @media (max-width: 1280px) {
   .pp-workbench-grid {
-    grid-template-columns: 280px 1fr 400px;
+    grid-template-columns: 1fr 420px;
   }
 }
 @media (max-width: 1024px) {
   .pp-workbench-grid {
-    grid-template-columns: 260px 1fr;
+    grid-template-columns: 1fr;
   }
   .pp-pane-right { display: none; }
 }
