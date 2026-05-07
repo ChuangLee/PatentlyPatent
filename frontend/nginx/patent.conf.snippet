@@ -1,0 +1,31 @@
+# 把以下 location 块加到 /etc/nginx/conf.d/3xui.conf 的 server_name blind.pub 块内：
+
+location = /patent {
+    return 301 /patent/;
+}
+
+location /patent/ {
+    alias /var/www/patent/;
+    index index.html;
+    try_files $uri $uri/ /patent/index.html;
+
+    # MSW worker 必须有正确 MIME 与 Service-Worker-Allowed
+    location ~ ^/patent/mockServiceWorker\.js$ {
+        alias /var/www/patent/mockServiceWorker.js;
+        types { } default_type application/javascript;
+        add_header Service-Worker-Allowed "/patent/";
+        add_header Cache-Control "no-cache, no-store, must-revalidate";
+    }
+
+    # 静态资源长缓存
+    location ~* /patent/assets/.*\.(js|css|png|jpg|svg|woff2)$ {
+        expires 30d;
+        add_header Cache-Control "public, immutable";
+    }
+
+    # index.html 不缓存（保证发版即生效）
+    add_header Cache-Control "no-cache, no-store, must-revalidate";
+
+    # 防搜索引擎收录
+    add_header X-Robots-Tag "noindex, nofollow";
+}
