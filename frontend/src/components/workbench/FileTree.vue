@@ -27,9 +27,10 @@ import {
   ColumnWidthOutlined,
 } from '@ant-design/icons-vue';
 import { useFilesStore } from '@/stores/files';
+import { filesApi } from '@/api/files';
 import type { FileNode, FileMime } from '@/types';
 
-defineProps<{ projectId: string }>();
+const props = defineProps<{ projectId: string }>();
 
 const files = useFilesStore();
 const wrapNames = ref(false);   // 多行 / 单行
@@ -199,6 +200,110 @@ async function beforeUpload(file: File): Promise<boolean> {
   });
   message.success(`已添加：${file.name}`);
   return false; // 阻止真实上传
+}
+
+// ─── 原生 HTML drag-and-drop 多文件批上传 ───
+const nativeDropActive = ref(false);
+const nativeDropCount = ref(0);
+const nativeDropUploading = ref(false);
+
+/** 解析批上传的目标父文件夹 id */
+function resolveDropTargetFolderId(): { id: string | null; name: string } {
+  // 当前选中 folder 优先
+  if (currentFolderId.value) {
+    const n = files.getNode(currentFolderId.value);
+    if (n && n.kind === 'folder') {
+      return { id: n.id, name: n.name };
+    }
+  }
+  // 找 source==='user' && parentId===null 的根（"我的资料/"）
+  const rootUser = files.tree.find(
+    (n: FileNode) => n.parentId === null && n.source === 'user' && n.kind === 'folder',
+  );
+  if (rootUser) return { id: rootUser.id, name: rootUser.name };
+  // 兜底：第一个根文件夹
+  const anyRoot = files.tree.find((n: FileNode) => n.parentId === null && n.kind === 'folder');
+  return anyRoot ? { id: anyRoot.id, name: anyRoot.name } : { id: null, name: '根目录' };
+}
+
+function isTextLikeMime(m: FileMime): boolean {
+  return m === 'text/markdown' || m === 'text/plain' || m === 'application/json';
+}
+
+function onNativeDragOver(e: DragEvent) {
+  // 只接 OS 文件拖入（dataTransfer.types 含 'Files'），不拦截内部节点拖拽
+  const types = e.dataTransfer?.types;
+  if (!types || !Array.from(types).includes('Files')) return;
+  e.preventDefault();
+  if (e.dataTransfer) e.dataTransfer.dropEffect = 'copy';
+  nativeDropActive.value = true;
+  // dragover 不一定能拿到 files.length（多数浏览器为 0），用 items.length 作提示
+  const itemsLen = e.dataTransfer?.items?.length ?? 0;
+  if (itemsLen > 0) nativeDropCount.value = itemsLen;
+}
+
+function onNativeDragLeave(e: DragEvent) {
+  // 离开容器外才清；relatedTarget 为 null 或不在容器内时
+  const related = e.relatedTarget as Node | null;
+  const current = e.currentTarget as HTMLElement | null;
+  if (!current) return;
+  if (!related || !current.contains(related)) {
+    nativeDropActive.value = false;
+    nativeDropCount.value = 0;
+  }
+}
+
+async function onNativeDrop(e: DragEvent) {
+  const types = e.dataTransfer?.types;
+  if (!types || !Array.from(types).includes('Files')) return;
+  e.preventDefault();
+  nativeDropActive.value = false;
+  nativeDropCount.value = 0;
+
+  const fileList = e.dataTransfer?.files;
+  if (!fileList || fileList.length === 0) return;
+  const fileArr: File[] = Array.from(fileList);
+
+  const { id: targetParentId, name: targetName } = resolveDropTargetFolderId();
+  if (!targetParentId) {
+    message.error('未找到上传目标文件夹');
+    return;
+  }
+
+  nativeDropUploading.value = true;
+  let okCount = 0;
+  const pid = props.projectId;
+
+  // 顺序上传：FileReader + 后端调用串行，避免一次性把大文件全读进内存
+  for (const f of fileArr) {
+    try {
+      const mime = inferMimeFromName(f.name);
+      let content: string | undefined;
+      if (isTextLikeMime(mime)) {
+        try { content = await readAsText(f); } catch { /* 二进制兜底：忽略 */ }
+      }
+      const body: Partial<FileNode> = {
+        name: f.name,
+        kind: 'file',
+        parentId: targetParentId,
+        source: 'user',
+        mime,
+        size: f.size,
+        ...(content !== undefined ? { content } : {}),
+      };
+      const node = await filesApi.create(pid, body);
+      files.pushNode(node);
+      okCount += 1;
+    } catch (err) {
+      console.error('[FileTree native drop] upload failed', f.name, err);
+      message.error(`上传失败：${f.name}`);
+    }
+  }
+
+  nativeDropUploading.value = false;
+  if (okCount > 0) {
+    message.success(`已上传 ${okCount} 个文件到 ${targetName}`);
+  }
 }
 
 // ─── 节点选中 / 展开 ───
@@ -450,8 +555,21 @@ function renderNodeTitle(node: AntdTreeNode) {
       </ATooltip>
     </div>
 
-    <!-- 树 -->
-    <div style="flex:1;overflow:auto;padding:6px">
+    <!-- 树（含原生 HTML drop zone：从 OS 拖文件到此区域批上传） -->
+    <div
+      class="pp-tree-dropzone"
+      :class="{ 'pp-tree-drop-active': nativeDropActive }"
+      style="flex:1;overflow:auto;padding:6px;position:relative"
+      @dragover="onNativeDragOver"
+      @dragleave="onNativeDragLeave"
+      @drop="onNativeDrop"
+    >
+      <!-- 拖拽叠层提示 -->
+      <div v-if="nativeDropActive" class="pp-tree-drop-overlay">
+        <div class="pp-tree-drop-hint">
+          释放以上传 {{ nativeDropCount > 0 ? nativeDropCount : '' }} 个文件
+        </div>
+      </div>
       <ADropdown :trigger="['contextmenu']">
         <div>
           <ATree
@@ -531,6 +649,36 @@ function renderNodeTitle(node: AntdTreeNode) {
 .pp-tree-dragging {
   /* 拖拽进行中给整个 tree 一点提示 */
   cursor: grabbing;
+}
+/* 原生拖拽（OS 文件 → 树容器）批上传视觉反馈 */
+.pp-tree-dropzone {
+  border: 2px dashed transparent;
+  border-radius: 6px;
+  transition: border-color 0.15s, background-color 0.15s;
+}
+.pp-tree-drop-active {
+  border-color: #1677ff;
+  background-color: #e6f4ff;
+}
+.pp-tree-drop-overlay {
+  position: absolute;
+  inset: 6px;
+  pointer-events: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(230, 244, 255, 0.55);
+  border-radius: 4px;
+  z-index: 5;
+}
+.pp-tree-drop-hint {
+  background: #1677ff;
+  color: #fff;
+  font-size: 13px;
+  font-weight: 500;
+  padding: 6px 14px;
+  border-radius: 16px;
+  box-shadow: 0 2px 8px rgba(22, 119, 255, 0.35);
 }
 /* 多行显示：节点 title 换行 */
 :deep(.pp-tree-wrap .ant-tree-node-content-wrapper) {

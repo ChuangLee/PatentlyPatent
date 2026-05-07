@@ -62,4 +62,38 @@ describe('consumeSSE', () => {
     expect(events).toEqual([]);
     fetchSpy.mockRestore();
   });
+
+  // v0.13-D: AbortSignal 流式取消
+  it('AbortSignal 中断 fetch — fetch 抛 AbortError 时静默 return', async () => {
+    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockImplementation(async (_url, init) => {
+      const sig = (init as RequestInit | undefined)?.signal;
+      if (sig?.aborted) {
+        const err = new Error('aborted');
+        (err as Error & { name: string }).name = 'AbortError';
+        throw err;
+      }
+      return makeStreamingResponse(['event: delta\ndata: {"chunk":"x"}\n\n']);
+    });
+    const ctrl = new AbortController();
+    ctrl.abort();
+    const events: ChatStreamEvent[] = [];
+    // 不应抛错；events 为空
+    await expect(
+      consumeSSE('/api/test', { method: 'POST' }, e => events.push(e), ctrl.signal),
+    ).resolves.toBeUndefined();
+    expect(events).toEqual([]);
+    fetchSpy.mockRestore();
+  });
+
+  it('signal 透传给 fetch init', async () => {
+    let receivedSignal: AbortSignal | undefined;
+    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockImplementation(async (_url, init) => {
+      receivedSignal = (init as RequestInit | undefined)?.signal as AbortSignal | undefined;
+      return makeStreamingResponse(['event: done\ndata: {}\n\n']);
+    });
+    const ctrl = new AbortController();
+    await consumeSSE('/api/test', { method: 'POST' }, () => {}, ctrl.signal);
+    expect(receivedSignal).toBe(ctrl.signal);
+    fetchSpy.mockRestore();
+  });
 });

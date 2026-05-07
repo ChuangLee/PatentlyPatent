@@ -1,7 +1,7 @@
 """SQLAlchemy engine + session"""
 from __future__ import annotations
 from contextlib import contextmanager
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, event, text
 from sqlalchemy.orm import sessionmaker, DeclarativeBase
 
 from .config import settings
@@ -11,11 +11,26 @@ class Base(DeclarativeBase):
     pass
 
 
+_is_sqlite = settings.db_url.startswith("sqlite")
+
 engine = create_engine(
     settings.db_url,
-    connect_args={"check_same_thread": False} if settings.db_url.startswith("sqlite") else {},
+    connect_args={"check_same_thread": False} if _is_sqlite else {},
     echo=False,
 )
+
+# v0.13-C: SQLite WAL + 关键 PRAGMA（每个新连接执行一次）
+if _is_sqlite:
+    @event.listens_for(engine, "connect")
+    def _sqlite_pragmas(dbapi_conn, _record):
+        cur = dbapi_conn.cursor()
+        cur.execute("PRAGMA journal_mode=WAL")          # 并发读 + 单写
+        cur.execute("PRAGMA synchronous=NORMAL")        # WAL 下安全
+        cur.execute("PRAGMA temp_store=MEMORY")
+        cur.execute("PRAGMA cache_size=-64000")         # 64 MB
+        cur.execute("PRAGMA foreign_keys=ON")
+        cur.close()
+
 SessionLocal = sessionmaker(bind=engine, autocommit=False, autoflush=False)
 
 
@@ -41,6 +56,27 @@ def session_scope():
 
 
 def init_db():
-    """开发期：直接 metadata.create_all。生产用 alembic"""
+    """开发期：直接 metadata.create_all。生产用 alembic。
+    v0.13-C：补关键 index（CREATE INDEX IF NOT EXISTS 幂等）。
+    """
     from . import models  # noqa: F401 — 触发 ORM 注册
     Base.metadata.create_all(bind=engine)
+
+    # 关键索引（幂等）
+    indices = [
+        "CREATE INDEX IF NOT EXISTS ix_projects_owner_status ON projects(owner_id, status)",
+        "CREATE INDEX IF NOT EXISTS ix_projects_status        ON projects(status)",
+        "CREATE INDEX IF NOT EXISTS ix_file_nodes_proj_parent ON file_nodes(project_id, parent_id)",
+        "CREATE INDEX IF NOT EXISTS ix_file_nodes_proj_source ON file_nodes(project_id, source)",
+    ]
+    with engine.begin() as conn:
+        for ddl in indices:
+            try:
+                conn.execute(text(ddl))
+            except Exception:
+                pass
+        # v0.13-B: 幂等迁移 — 给已存在的老库补 archived 列
+        try:
+            conn.execute(text("ALTER TABLE projects ADD COLUMN archived INTEGER DEFAULT 0"))
+        except Exception:
+            pass  # column already exists

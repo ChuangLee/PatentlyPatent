@@ -15,4 +15,8 @@ export const projectsApi = {
     attachments?: Attachment[];
   }) =>
     apiClient.post<Project>('/projects', data).then(r => r.data),
+  update: (id: string, body: { title?: string; archived?: boolean }) =>
+    apiClient.patch<Project>(`/projects/${id}`, body).then(r => r.data),
+  remove: (id: string) =>
+    apiClient.delete(`/projects/${id}`).then(r => r.data),
 };

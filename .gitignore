@@ -49,3 +49,5 @@ templates/
 backend/patentlypatent.db
 backend/storage/
 backend/.venv/
+backend/patentlypatent.db-*
+.claude/scheduled_tasks.lock

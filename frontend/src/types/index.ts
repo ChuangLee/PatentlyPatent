@@ -93,6 +93,7 @@ export interface Project {
   customDomain?: string;                // domain==='other' 时填，自由文本
   description: string;
   status: ProjectStatus;
+  archived?: boolean;
   ownerId: string;
   createdAt: string;
   updatedAt: string;

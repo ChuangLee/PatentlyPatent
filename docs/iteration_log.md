@@ -143,3 +143,26 @@ title: PatentlyPatent 迭代日志
 - 后端加 SQLite WAL + index（status, owner_id, parent_id 多查询）
 - 流式取消 e2e 真实测试（curl --max-time + abort 模拟）
 
+
+
+## v0.13 · 2026-05-08 04:10 · 拖拽多文件 + 项目右键菜单 + SQLite WAL + 流式取消单测
+
+**调研**
+- ROI: A 拖拽中 / B 右键菜单中 / C WAL 小 / D abort 单测小 → A+B 各派 subagent 并行；C+D 自做
+
+**实现**
+- A. (subagent) FileTree.vue 包裹 a-tree 的容器接 dragover/dragleave/drop；用 dataTransfer.types.includes('Files') 区分 OS 拖入 vs 内部节点拖拽；目标 folder 解析: currentFolderId → '我的资料/' 根 → 任一根 folder；顺序批传(for-of+await)，文本走 readAsText 取 content，二进制只传 meta；新增 src/api/files.ts 的 filesApi.create
+- B. (subagent) 后端 Project.archived 字段 + 幂等 ALTER + ProjectUpdate(title?/archived?) + PATCH /{pid} + DELETE /{pid}（cascade FileNode）；前端 DefaultLayout sidebar 项目卡片用 a-dropdown trigger=contextmenu 套 a-menu（重命名/归档/删除）；重命名走 AModal.confirm + h(AInput) 受控；归档项加 pp-proj-archived 灰透+删除线+📦
+- C. backend/app/db.py：sqlite connect 监听器开 WAL/synchronous=NORMAL/temp_store=MEMORY/cache=64MB/foreign_keys；init_db() 末尾 4 个 CREATE INDEX IF NOT EXISTS（projects(owner_id,status), projects(status), file_nodes(project_id,parent_id), file_nodes(project_id,source)）
+- D. frontend/tests/unit/utils/sse.spec.ts：+2 用例（AbortSignal 已 abort 时 fetch 抛 AbortError，consumeSSE 静默 return；signal 透传给 fetch init）
+
+**测试**
+- pnpm test 37/37（35→37）/ pnpm build / vue-tsc 严格无错
+- sqlite verify: journal_mode=wal ✓ ；4 indices 已建
+- 公网 e2e：POST 创建 → PATCH(title+archived) ✓ → DELETE 204 → GET 404 ✓
+
+**下轮目标 (v0.14)**
+- 项目卡片 hover 显示三点菜单（不止右键，也支持点击）— 移动/触屏可达
+- "我的资料/"批上传进度条（当前只有完成 toast，无单文件进度）
+- 后端 FastAPI lifespan 开关把 init_db 的 ALTER 收口（目前 archived 字段是首次启动迁移的）
+- 归档项目从主列表隐藏（默认过滤）+ 一个"已归档"切换 view

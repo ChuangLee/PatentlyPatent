@@ -88,6 +88,7 @@ class ProjectOut(_CamelModel):
     custom_domain: Optional[str] = None
     description: str
     status: PROJECT_STATUS
+    archived: bool = False
     owner_id: str
     created_at: datetime
     updated_at: datetime

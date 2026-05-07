@@ -1,6 +1,7 @@
 <script setup lang="ts">
-import { computed, onMounted, ref, watch } from 'vue';
+import { computed, h, onMounted, ref, watch } from 'vue';
 import { useRouter, useRoute } from 'vue-router';
+import { Modal as AModal, Input as AInput, message } from 'ant-design-vue';
 import { useAuthStore } from '@/stores/auth';
 import { useUIStore } from '@/stores/ui';
 import { useFilesStore } from '@/stores/files';
@@ -71,6 +72,79 @@ function newProject() {
   router.push('/employee/dashboard?new=1');
 }
 
+/** v0.13-B: 项目右键菜单 — 重命名 / 归档 / 删除 */
+function renameProject(p: Project) {
+  const newTitle = ref(p.title);
+  AModal.confirm({
+    title: '重命名项目',
+    icon: null,
+    content: () => h(AInput, {
+      value: newTitle.value,
+      'onUpdate:value': (v: string) => { newTitle.value = v; },
+      placeholder: '请输入新的项目标题',
+      maxlength: 256,
+    }),
+    okText: '确定',
+    cancelText: '取消',
+    async onOk() {
+      const t = (newTitle.value || '').trim();
+      if (!t) {
+        message.warning('标题不能为空');
+        return Promise.reject();
+      }
+      if (t === p.title) return;
+      try {
+        await projectsApi.update(p.id, { title: t });
+        message.success('已重命名');
+        await loadMyProjects();
+      } catch (e: any) {
+        message.error('重命名失败：' + (e?.message || e));
+      }
+    },
+  });
+}
+
+function toggleArchive(p: Project) {
+  const willArchive = !p.archived;
+  AModal.confirm({
+    title: willArchive ? '归档此项目？' : '取消归档？',
+    content: willArchive
+      ? `项目 "${p.title}" 将被归档（仍可恢复）。`
+      : `项目 "${p.title}" 将恢复到活跃列表。`,
+    okText: '确定', cancelText: '取消',
+    async onOk() {
+      try {
+        await projectsApi.update(p.id, { archived: willArchive });
+        message.success(willArchive ? '已归档' : '已取消归档');
+        await loadMyProjects();
+      } catch (e: any) {
+        message.error('操作失败：' + (e?.message || e));
+      }
+    },
+  });
+}
+
+function deleteProject(p: Project) {
+  AModal.confirm({
+    title: `删除项目 "${p.title}"？`,
+    content: '将连同其所有文件一并删除，无法恢复。',
+    okText: '删除', okType: 'danger', cancelText: '取消',
+    async onOk() {
+      try {
+        await projectsApi.remove(p.id);
+        message.success('项目已删除');
+        // 若当前正在被删的项目工作台内，回到 dashboard
+        if (currentProjectId.value === p.id) {
+          router.push('/employee/dashboard');
+        }
+        await loadMyProjects();
+      } catch (e: any) {
+        message.error('删除失败：' + (e?.message || e));
+      }
+    },
+  });
+}
+
 function logout() {
   auth.logout();
   router.push('/login');
@@ -111,22 +185,39 @@ function onMenuClick({ key }: { key: string }) {
           <a-spin :spinning="loadingProjects" size="small">
             <div v-if="!loadingProjects && myProjects.length === 0" class="pp-empty">还没有项目</div>
             <div v-else class="pp-proj-list">
-              <div v-for="p in myProjects" :key="p.id"
-                   class="pp-proj-item"
-                   :class="{ 'pp-proj-active': currentProjectId === p.id }"
-                   @click="goProject(p)">
-                <div class="pp-proj-title">{{ p.title }}</div>
-                <div class="pp-proj-meta">
-                  <!-- v0.12-A: 4 段进度徽章（报门→挖掘→检索→完成） -->
-                  <span class="pp-stage" :title="STATUS_LABEL[p.status]">
-                    <span v-for="(filled, i) in stageDots(p.status)" :key="i"
-                          class="pp-dot" :class="{ on: filled }" />
-                  </span>
-                  <a-tag :color="STATUS_COLOR[p.status]" style="margin:0 0 0 6px;font-size:11px">
-                    {{ STATUS_LABEL[p.status] }}
-                  </a-tag>
+              <a-dropdown v-for="p in myProjects" :key="p.id" :trigger="['contextmenu']">
+                <div class="pp-proj-item"
+                     :class="{ 'pp-proj-active': currentProjectId === p.id, 'pp-proj-archived': p.archived }"
+                     @click="goProject(p)">
+                  <div class="pp-proj-title">
+                    <span v-if="p.archived" class="pp-archived-tag" title="已归档">📦</span>
+                    {{ p.title }}
+                  </div>
+                  <div class="pp-proj-meta">
+                    <!-- v0.12-A: 4 段进度徽章（报门→挖掘→检索→完成） -->
+                    <span class="pp-stage" :title="STATUS_LABEL[p.status]">
+                      <span v-for="(filled, i) in stageDots(p.status)" :key="i"
+                            class="pp-dot" :class="{ on: filled }" />
+                    </span>
+                    <a-tag :color="STATUS_COLOR[p.status]" style="margin:0 0 0 6px;font-size:11px">
+                      {{ STATUS_LABEL[p.status] }}
+                    </a-tag>
+                  </div>
                 </div>
-              </div>
+                <template #overlay>
+                  <a-menu @click="(e: any) => { e?.domEvent?.stopPropagation?.();
+                                                if (e.key === 'rename') renameProject(p);
+                                                else if (e.key === 'archive') toggleArchive(p);
+                                                else if (e.key === 'delete') deleteProject(p); }">
+                    <a-menu-item key="rename">✏️ 重命名</a-menu-item>
+                    <a-menu-item key="archive">
+                      {{ p.archived ? '📤 取消归档' : '📦 归档' }}
+                    </a-menu-item>
+                    <a-menu-divider />
+                    <a-menu-item key="delete" danger>🗑️ 删除</a-menu-item>
+                  </a-menu>
+                </template>
+              </a-dropdown>
             </div>
           </a-spin>
           <a-button type="primary" block size="small" style="margin-top:8px" @click="newProject">
@@ -230,6 +321,17 @@ function onMenuClick({ key }: { key: string }) {
 .pp-proj-active {
   background: #e6f0ff;
   border-color: #91caff;
+}
+.pp-proj-archived {
+  opacity: 0.55;
+  background: #fafafa;
+}
+.pp-proj-archived .pp-proj-title {
+  text-decoration: line-through;
+  text-decoration-color: #bbb;
+}
+.pp-archived-tag {
+  margin-right: 4px;
 }
 /* v0.12-A: 阶段点 */
 .pp-stage {

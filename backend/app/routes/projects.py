@@ -6,9 +6,16 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 from sqlalchemy import select
 
+from pydantic import BaseModel
+
 from ..db import get_db
 from ..models import Project, FileNode
 from ..schemas import ProjectCreate, ProjectOut, FileNodeOut
+
+
+class ProjectUpdate(BaseModel):
+    title: str | None = None
+    archived: bool | None = None
 
 router = APIRouter(prefix="/projects", tags=["projects"])
 
@@ -17,7 +24,8 @@ def _project_to_out(p: Project, with_files: bool = False) -> dict:
     out = {
         "id": p.id, "title": p.title, "domain": p.domain,
         "customDomain": p.custom_domain, "description": p.description,
-        "status": p.status, "ownerId": p.owner_id,
+        "status": p.status, "archived": bool(getattr(p, "archived", False) or False),
+        "ownerId": p.owner_id,
         "createdAt": p.created_at.isoformat(),
         "updatedAt": p.updated_at.isoformat(),
         "intake": p.intake_json, "miningSummary": p.mining_summary_json,
@@ -102,3 +110,27 @@ def create_project(body: ProjectCreate, db: Session = Depends(get_db)):
     db.commit()
     db.refresh(p)
     return _project_to_out(p, with_files=True)
+
+
+@router.patch("/{pid}", response_model=dict)
+def update_project(pid: str, body: ProjectUpdate, db: Session = Depends(get_db)):
+    p = db.get(Project, pid)
+    if not p:
+        raise HTTPException(404, "project not found")
+    if body.title is not None:
+        p.title = body.title
+    if body.archived is not None:
+        p.archived = body.archived
+    db.commit()
+    db.refresh(p)
+    return _project_to_out(p)
+
+
+@router.delete("/{pid}", status_code=204)
+def delete_project(pid: str, db: Session = Depends(get_db)):
+    p = db.get(Project, pid)
+    if not p:
+        raise HTTPException(404, "project not found")
+    db.delete(p)  # cascade delete files (relationship cascade='all, delete-orphan')
+    db.commit()
+    return None
