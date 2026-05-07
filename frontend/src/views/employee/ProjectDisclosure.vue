@@ -1,26 +1,25 @@
 <script setup lang="ts">
 import { onMounted, ref, computed } from 'vue';
-import { useRoute, useRouter } from 'vue-router';
+import { useRoute } from 'vue-router';
 import { projectsApi } from '@/api/projects';
 import { disclosureApi } from '@/api/disclosure';
 import { useAuthStore } from '@/stores/auth';
 import ClaimTierSelector from '@/components/disclosure/ClaimTierSelector.vue';
 import TiptapEditor from '@/components/disclosure/TiptapEditor.vue';
 import ReadonlyBanner from '@/components/common/ReadonlyBanner.vue';
-import { message, Modal } from 'ant-design-vue';
+import { message } from 'ant-design-vue';
+import { exportDocx } from '@/utils/exportDocx';
 import type { Project, ClaimTier } from '@/types';
 
 const route = useRoute();
-const router = useRouter();
 const auth = useAuthStore();
 
 const project = ref<Project | null>(null);
 const tier = ref<ClaimTier>('medium');
 const body = ref<string>('');
-const submitting = ref(false);
+const exporting = ref(false);
 
 const isReadonly = computed(() => auth.role === 'admin');
-const isSubmitted = computed(() => project.value?.status === 'submitted');
 
 onMounted(async () => {
   const id = route.params.id as string;
@@ -61,56 +60,39 @@ function copyMarkdown() {
   message.success('Markdown 已复制到剪贴板');
 }
 
-function exportDocx() {
-  message.info('v0.2 支持真实 docx 导出，目前已下载占位 .docx 文件（演示）');
-}
-
-async function submit() {
+async function handleExport() {
   if (!project.value) return;
-  Modal.confirm({
-    title: '确认提交存档？',
-    content: '提交后将由 IP 部门线下处理；可以"取消提交"回退编辑。',
-    async onOk() {
-      submitting.value = true;
-      try {
-        await projectsApi.submit(project.value!.id);
-        project.value!.status = 'submitted';
-        message.success('已提交至 IP 部门，将由专员线下处理');
-      } finally { submitting.value = false; }
-    },
-  });
-}
-
-async function unsubmit() {
-  if (!project.value) return;
-  await projectsApi.unsubmit(project.value.id);
-  project.value.status = 'reporting';
-  message.info('已取消提交，可继续编辑');
+  exporting.value = true;
+  try {
+    await exportDocx(project.value, tier.value);
+    message.success('交底书已下载');
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e);
+    message.error(`导出失败：${msg}`);
+  } finally {
+    exporting.value = false;
+  }
 }
 </script>
 
 <template>
   <ReadonlyBanner :show="isReadonly" />
-  <a-page-header :title="project?.title ?? ''" sub-title="交底书编辑 · 三档独权切换" />
+  <a-page-header :title="`项目 · ${project?.title ?? ''}`" sub-title="交底书编辑 · 三档独权切换" />
 
   <ClaimTierSelector v-if="project?.disclosure"
                      :claims="project.disclosure.claims"
                      :model-value="tier"
-                     :readonly="isReadonly || isSubmitted"
+                     :readonly="isReadonly"
                      @update:model-value="changeTier" />
 
   <a-divider />
 
-  <TiptapEditor v-model="body" :readonly="isReadonly || isSubmitted" />
+  <TiptapEditor v-model="body" :readonly="isReadonly" />
 
-  <div style="margin-top:24px;display:flex;gap:12px;justify-content:space-between">
+  <div style="margin-top:24px;display:flex;gap:12px;justify-content:flex-start">
     <a-space>
       <a-button @click="copyMarkdown">复制 Markdown</a-button>
-      <a-button @click="exportDocx">导出 docx</a-button>
-    </a-space>
-    <a-space v-if="!isReadonly">
-      <a-button v-if="isSubmitted" danger @click="unsubmit">取消提交，回退编辑</a-button>
-      <a-button v-else type="primary" :loading="submitting" @click="submit">提交存档 →</a-button>
+      <a-button type="primary" :loading="exporting" @click="handleExport">导出 docx</a-button>
     </a-space>
   </div>
 </template>

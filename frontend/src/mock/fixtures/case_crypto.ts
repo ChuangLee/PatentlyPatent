@@ -66,7 +66,7 @@ export const CASE_CRYPTO: Project = {
   title: '一种基于 Kyber-512 NTT 并行优化的轻量级 PQC KEM 实现',
   domain: 'cryptography',
   description: 'NIST 后量子标准 Kyber 的 NTT 子运算做了通道并行+向量化，嵌入式 ARM Cortex-M4 上密钥封装快了 38%。相对 PQClean 标量参考实现 38% 提升，代码体积增加 1.8KB。（演示数据）',
-  status: 'submitted',
+  status: 'completed',
   ownerId: 'u1',
   createdAt: '2026-05-01T09:00:00Z',
   updatedAt: '2026-05-04T15:30:00Z',

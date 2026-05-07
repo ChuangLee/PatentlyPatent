@@ -10,7 +10,7 @@ const filterDomain = ref<Domain | ''>('');
 const filterStatus = ref<ProjectStatus | ''>('');
 
 const STATUS_META: Record<ProjectStatus, string> = {
-  drafting: '草稿', researching: '挖掘中', reporting: '检索完成', submitted: '已提交',
+  drafting: '草稿', researching: '挖掘中', reporting: '检索完成', completed: '已完成（已导出）',
 };
 const DOMAIN_META: Record<Domain, string> = {
   cryptography: '密码学', infosec: '信息安全', ai: '人工智能', other: '其他',

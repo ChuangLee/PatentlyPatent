@@ -66,7 +66,7 @@ export const CASE_INFOSEC: Project = {
   title: '一种基于多信号融合行为基线的 API 网关异常请求检测方法与系统',
   domain: 'infosec',
   description: '在企业 API 网关里把统计 z-score + 梯度提升 ML + 滑动窗口自适应阈值三路信号融合，做账号纬度异常调用检测，误报率低 40%。（演示数据）',
-  status: 'submitted',
+  status: 'completed',
   ownerId: 'u1',
   createdAt: '2026-04-20T10:00:00Z',
   updatedAt: '2026-04-25T16:20:00Z',

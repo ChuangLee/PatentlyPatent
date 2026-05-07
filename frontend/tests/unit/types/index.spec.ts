@@ -12,7 +12,7 @@ describe('types', () => {
 
   it('ProjectStatus 4 状态', () => {
     expectTypeOf<ProjectStatus>().toEqualTypeOf<
-      'drafting' | 'researching' | 'reporting' | 'submitted'
+      'drafting' | 'researching' | 'reporting' | 'completed'
     >();
   });
 

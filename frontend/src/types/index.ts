@@ -1,8 +1,22 @@
 // 角色
 export type Role = 'employee' | 'admin';
 
-// 项目状态机
-export type ProjectStatus = 'drafting' | 'researching' | 'reporting' | 'submitted';
+// 项目状态机（v0.2 简化：删 submitted，员工导出 docx 后由本人决定后续）
+export type ProjectStatus = 'drafting' | 'researching' | 'reporting' | 'completed';
+
+// 报门时上传的资料（多种）
+export type AttachmentType = 'file' | 'link' | 'note';
+
+export interface Attachment {
+  id: string;
+  type: AttachmentType;
+  name: string;            // 文件名 / 链接标题 / note 摘要
+  size?: number;           // file 类型字节数
+  mime?: string;           // file 类型 MIME
+  url?: string;            // link 类型 URL
+  content?: string;        // note 类型纯文本
+  addedAt: string;         // ISO
+}
 
 // 技术领域
 export type Domain = 'cryptography' | 'infosec' | 'ai' | 'other';
@@ -81,6 +95,7 @@ export interface Project {
   ownerId: string;
   createdAt: string;
   updatedAt: string;
+  attachments?: Attachment[];           // 报门时上传的资料
   miningSummary?: MiningSummary;
   searchReport?: SearchReport;
   disclosure?: Disclosure;

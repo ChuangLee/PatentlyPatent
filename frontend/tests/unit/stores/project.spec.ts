@@ -40,8 +40,8 @@ describe('useProjectStore', () => {
     const s = useProjectStore();
     s.upsert(sample);
     const before = s.projects[0].updatedAt;
-    s.setStatus('p1', 'submitted');
-    expect(s.projects[0].status).toBe('submitted');
+    s.setStatus('p1', 'completed');
+    expect(s.projects[0].status).toBe('completed');
     expect(s.projects[0].updatedAt).not.toBe(before);
   });
 

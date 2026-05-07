@@ -9,7 +9,7 @@ const statusChartRef = ref<HTMLDivElement | null>(null);
 const patChartRef = ref<HTMLDivElement | null>(null);
 
 const STATUS_LABEL: Record<ProjectStatus, string> = {
-  drafting: '草稿', researching: '挖掘中', reporting: '检索完成', submitted: '已提交',
+  drafting: '草稿', researching: '挖掘中', reporting: '检索完成', completed: '已完成（已导出）',
 };
 const PAT_LABEL: Record<Patentability, string> = {
   strong: '很可能新颖', moderate: '边缘', weak: '存疑', not_recommended: '不建议',
@@ -92,8 +92,8 @@ function drawCharts() {
     </a-col>
     <a-col :span="6">
       <a-card>
-        <a-statistic title="已提交存档"
-                     :value="(stats.byStatus['已提交'] ?? 0)"
+        <a-statistic title="已完成（已导出）"
+                     :value="(stats.byStatus['已完成（已导出）'] ?? 0)"
                      :value-style="{ color: '#16a34a' }" />
       </a-card>
     </a-col>

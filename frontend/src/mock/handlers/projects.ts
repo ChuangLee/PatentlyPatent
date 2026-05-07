@@ -1,5 +1,5 @@
 import { http, HttpResponse } from 'msw';
-import type { Project, Domain } from '@/types';
+import type { Project, Domain, Attachment } from '@/types';
 import { ALL_CASES } from '../fixtures/all_cases';
 
 // 内存中可变项目仓（基于 ALL_CASES 拷贝，演示用）
@@ -21,6 +21,7 @@ export const projectsHandlers = [
   http.post('/api/projects', async ({ request }) => {
     const body = await request.json() as {
       title: string; description: string; domain: Domain; ownerId: string;
+      attachments?: Attachment[];
     };
     const newP: Project = {
       id: `p-new-${Date.now()}`,
@@ -31,24 +32,9 @@ export const projectsHandlers = [
       status: 'drafting',
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
+      attachments: body.attachments ?? [],
     };
     store.push(newP);
     return HttpResponse.json(newP, { status: 201 });
-  }),
-
-  http.post('/api/projects/:id/submit', ({ params }) => {
-    const p = store.find(x => x.id === params.id);
-    if (!p) return new HttpResponse(null, { status: 404 });
-    p.status = 'submitted';
-    p.updatedAt = new Date().toISOString();
-    return HttpResponse.json(p);
-  }),
-
-  http.post('/api/projects/:id/unsubmit', ({ params }) => {
-    const p = store.find(x => x.id === params.id);
-    if (!p) return new HttpResponse(null, { status: 404 });
-    p.status = 'reporting';
-    p.updatedAt = new Date().toISOString();
-    return HttpResponse.json(p);
   }),
 ];

@@ -13,16 +13,17 @@
     "deploy": "pnpm run build && bash scripts/deploy.sh"
   },
   "dependencies": {
-    "vue": "^3.5.13",
-    "vue-router": "^4.4.5",
-    "pinia": "^2.3.0",
-    "ant-design-vue": "^4.2.6",
     "@ant-design/icons-vue": "^7.0.1",
-    "axios": "^1.7.9",
-    "echarts": "^5.5.1",
-    "@tiptap/vue-3": "^2.10.4",
     "@tiptap/starter-kit": "^2.10.4",
-    "dayjs": "^1.11.13"
+    "@tiptap/vue-3": "^2.10.4",
+    "ant-design-vue": "^4.2.6",
+    "axios": "^1.7.9",
+    "dayjs": "^1.11.13",
+    "docx": "^9.6.1",
+    "echarts": "^5.5.1",
+    "pinia": "^2.3.0",
+    "vue": "^3.5.13",
+    "vue-router": "^4.4.5"
   },
   "pnpm": {
     "overrides": {

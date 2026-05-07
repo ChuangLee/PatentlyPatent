@@ -20,7 +20,7 @@ const STATUS_LABEL: Record<ProjectStatus, { text: string; color: string }> = {
   drafting:    { text: '草稿', color: 'default' },
   researching: { text: '挖掘中', color: 'processing' },
   reporting:   { text: '检索完成', color: 'cyan' },
-  submitted:   { text: '已提交存档', color: 'success' },
+  completed:   { text: '已完成（已导出）', color: 'success' },
 };
 
 function go(p: Project) {

@@ -27,14 +27,4 @@ describe('projects mock handlers', () => {
     expect(p.status).toBe('drafting');
     expect(p.id).toMatch(/^p-new-/);
   });
-
-  it('POST /projects/:id/submit 改状态为 submitted', async () => {
-    const p = await projectsApi.submit('p-crypto-001');
-    expect(p.status).toBe('submitted');
-  });
-
-  it('POST /projects/:id/unsubmit 改状态回 reporting', async () => {
-    const p = await projectsApi.unsubmit('p-crypto-001');
-    expect(p.status).toBe('reporting');
-  });
 });
