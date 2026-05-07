@@ -166,3 +166,27 @@ title: PatentlyPatent 迭代日志
 - "我的资料/"批上传进度条（当前只有完成 toast，无单文件进度）
 - 后端 FastAPI lifespan 开关把 init_db 的 ALTER 收口（目前 archived 字段是首次启动迁移的）
 - 归档项目从主列表隐藏（默认过滤）+ 一个"已归档"切换 view
+
+
+## v0.14 · 2026-05-08 05:18 · hover 三点菜单 + 上传进度条 + lifespan 收口 + 归档默认隐藏
+
+**调研**
+- ROI: A 三点菜单中 / B 进度条小 / C lifespan 极小（已 OK）/ D 归档过滤中 → A+D 派 1 个 subagent（同改 DefaultLayout）, C 派 1 个验证, 自做 B
+- C 调研后发现 main.py 已是 lifespan 形态（`@asynccontextmanager` + `lifespan=lifespan`，无 `on_event`），无需改，验证 6/6 项 PASS
+
+**实现**
+- A. (subagent) DefaultLayout.vue：项目卡片内嵌第二个 a-dropdown trigger=click 的「⋯」按钮（U+22EF），@click.stop 防冒泡触发 goProject；`onProjectMenuClick(p, e)` 抽函数复用，contextmenu+click 两个 dropdown 共用同一段 menu 模板；CSS pp-proj-actions 默认 opacity:0，:hover/触屏 (hover:none) opacity:1
+- B. (我做) FileTree.vue：onNativeDrop 加 uploadIndex/uploadTotal/uploadCurrentName ref，循环 i+1 更新；模板新增 .pp-tree-upload-overlay（白底 85%）含卡片：标题 N/total + 文件名 + a-progress active；与拖拽叠层互斥（uploading 时不显示 drop hint）
+- C. (subagent) 验证 main.py lifespan 形态完好，db.py WAL/index/ALTER 全部保留；二次重启无 OperationalError
+- D. (subagent) DefaultLayout.loadMyProjects 加 filter !p.archived 再排序取前 4（归档项不进 sidebar）；Dashboard.vue 加 archivedFilter ref + filteredProjects computed + a-segmented '活跃'/'已归档' 切换
+
+**测试**
+- pnpm test 37/37 / pnpm build vue-tsc + vite 通过
+- backend systemctl 二次重启无报错；PRAGMA journal_mode=wal ✓；4 indices ✓
+- 公网部署 200 / api/ping ok ✓
+
+**下轮目标 (v0.15)**
+- 大 chunk 拆分（Dashboard 1MB / index 1.5MB）— vite manualChunks 把 antd-vue / @ant-design/icons 单独切
+- AI 输出文件夹下章节对话历史持久化（目前刷新就丢，store 只存 sessionStorage）
+- search.py 智慧芽超时降级与缓存（当前每次挖掘都打 2 次 API；同 query 套 lru_cache TTL 5min）
+- 报门 modal 上传也接进度条（与 v0.14-B 共用样式）

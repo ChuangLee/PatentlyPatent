@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onMounted, ref, watch } from 'vue';
+import { computed, onMounted, ref, watch } from 'vue';
 import { useRouter, useRoute } from 'vue-router';
 import { projectsApi } from '@/api/projects';
 import { useAuthStore } from '@/stores/auth';
@@ -12,6 +12,14 @@ const auth = useAuthStore();
 const projects = ref<Project[]>([]);
 const loading = ref(true);
 const modalOpen = ref(false);
+
+// v0.14-D: 活跃 / 已归档 切换，默认活跃
+const archivedFilter = ref<'活跃' | '已归档'>('活跃');
+const filteredProjects = computed(() =>
+  projects.value.filter((p) =>
+    archivedFilter.value === '已归档' ? p.archived === true : p.archived !== true,
+  ),
+);
 
 async function refresh() {
   loading.value = true;
@@ -49,14 +57,23 @@ function go(p: Project) {
 <template>
   <a-page-header title="我的创新项目" sub-title="把工作中发现的创新点报上来，AI 帮你拆解并起草交底书" />
 
-  <a-button type="primary" size="large" style="margin-bottom:24px" @click="modalOpen = true">
-    ✨ 新建报门（提交创意，启动 AI 专利挖掘）
-  </a-button>
+  <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:24px;flex-wrap:wrap;gap:12px">
+    <a-button type="primary" size="large" @click="modalOpen = true">
+      ✨ 新建报门（提交创意，启动 AI 专利挖掘）
+    </a-button>
+    <!-- v0.14-D: 活跃 / 已归档 切换 -->
+    <a-segmented v-model:value="archivedFilter" :options="['活跃', '已归档']" />
+  </div>
 
   <a-spin :spinning="loading">
-    <a-empty v-if="!loading && projects.length === 0" description="还没有创新项目，点击上方'新建报门（提交创意）'开始" />
+    <a-empty
+      v-if="!loading && filteredProjects.length === 0"
+      :description="archivedFilter === '已归档'
+        ? '没有已归档的项目'
+        : (projects.length === 0 ? `还没有创新项目，点击上方'新建报门（提交创意）'开始` : '没有活跃项目')"
+    />
     <a-row :gutter="[16, 16]" v-else>
-      <a-col v-for="p in projects" :key="p.id" :xs="24" :md="12" :lg="8">
+      <a-col v-for="p in filteredProjects" :key="p.id" :xs="24" :md="12" :lg="8">
         <a-card hoverable :title="p.title" @click="go(p)">
           <template #extra>
             <a-tag :color="STATUS_LABEL[p.status].color">{{ STATUS_LABEL[p.status].text }}</a-tag>

@@ -26,7 +26,9 @@ async function loadMyProjects() {
   try {
     const list = await projectsApi.list({ ownerId: auth.user.id });
     // 按 updatedAt desc 排，取前 4
-    myProjects.value = [...list]
+    // v0.14-D: 归档项目不进 sidebar 4 条；先 filter 再排序
+    myProjects.value = list
+      .filter((p) => !p.archived)
       .sort((a, b) => (a.updatedAt < b.updatedAt ? 1 : -1))
       .slice(0, 4);
   } finally {
@@ -145,6 +147,14 @@ function deleteProject(p: Project) {
   });
 }
 
+/** v0.14-A: 抽出菜单点击处理，contextmenu 和 ⋯ click 复用 */
+function onProjectMenuClick(p: Project, e: any) {
+  e?.domEvent?.stopPropagation?.();
+  if (e.key === 'rename') renameProject(p);
+  else if (e.key === 'archive') toggleArchive(p);
+  else if (e.key === 'delete') deleteProject(p);
+}
+
 function logout() {
   auth.logout();
   router.push('/login');
@@ -189,6 +199,25 @@ function onMenuClick({ key }: { key: string }) {
                 <div class="pp-proj-item"
                      :class="{ 'pp-proj-active': currentProjectId === p.id, 'pp-proj-archived': p.archived }"
                      @click="goProject(p)">
+                  <!-- v0.14-A: hover 显示 ⋯ 三点菜单按钮，click 触发同一菜单 -->
+                  <a-dropdown :trigger="['click']">
+                    <a-button
+                      type="text"
+                      size="small"
+                      class="pp-proj-actions"
+                      title="更多操作"
+                      @click.stop>⋯</a-button>
+                    <template #overlay>
+                      <a-menu @click="(e: any) => onProjectMenuClick(p, e)">
+                        <a-menu-item key="rename">✏️ 重命名</a-menu-item>
+                        <a-menu-item key="archive">
+                          {{ p.archived ? '📤 取消归档' : '📦 归档' }}
+                        </a-menu-item>
+                        <a-menu-divider />
+                        <a-menu-item key="delete" danger>🗑️ 删除</a-menu-item>
+                      </a-menu>
+                    </template>
+                  </a-dropdown>
                   <div class="pp-proj-title">
                     <span v-if="p.archived" class="pp-archived-tag" title="已归档">📦</span>
                     {{ p.title }}
@@ -205,10 +234,7 @@ function onMenuClick({ key }: { key: string }) {
                   </div>
                 </div>
                 <template #overlay>
-                  <a-menu @click="(e: any) => { e?.domEvent?.stopPropagation?.();
-                                                if (e.key === 'rename') renameProject(p);
-                                                else if (e.key === 'archive') toggleArchive(p);
-                                                else if (e.key === 'delete') deleteProject(p); }">
+                  <a-menu @click="(e: any) => onProjectMenuClick(p, e)">
                     <a-menu-item key="rename">✏️ 重命名</a-menu-item>
                     <a-menu-item key="archive">
                       {{ p.archived ? '📤 取消归档' : '📦 归档' }}
@@ -309,6 +335,7 @@ function onMenuClick({ key }: { key: string }) {
   overflow: auto;
 }
 .pp-proj-item {
+  position: relative;
   padding: 6px 8px;
   border-radius: 6px;
   cursor: pointer;
@@ -317,6 +344,32 @@ function onMenuClick({ key }: { key: string }) {
 }
 .pp-proj-item:hover {
   background: #f5f8ff;
+}
+/* v0.14-A: ⋯ 按钮 hover 时显示 */
+.pp-proj-actions {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  opacity: 0;
+  transition: opacity 0.15s;
+  padding: 0 6px !important;
+  height: 20px !important;
+  line-height: 18px !important;
+  font-size: 16px !important;
+  color: #666;
+  z-index: 1;
+}
+.pp-proj-item:hover .pp-proj-actions {
+  opacity: 1;
+}
+.pp-proj-actions:hover {
+  background: rgba(0, 0, 0, 0.06) !important;
+  color: #1677ff;
+}
+@media (hover: none) {
+  .pp-proj-actions {
+    opacity: 1;
+  }
 }
 .pp-proj-active {
   background: #e6f0ff;

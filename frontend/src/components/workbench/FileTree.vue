@@ -14,6 +14,7 @@ import {
   Menu as AMenu,
   MenuItem as AMenuItem,
   Tooltip as ATooltip,
+  Progress as AProgress,
   message,
 } from 'ant-design-vue';
 import {
@@ -206,6 +207,15 @@ async function beforeUpload(file: File): Promise<boolean> {
 const nativeDropActive = ref(false);
 const nativeDropCount = ref(0);
 const nativeDropUploading = ref(false);
+// v0.14-B: 批上传单文件进度
+const uploadIndex = ref(0);   // 1-based 当前正在上传的序号
+const uploadTotal = ref(0);
+const uploadCurrentName = ref('');
+const uploadPercent = computed(() =>
+  uploadTotal.value > 0
+    ? Math.round((uploadIndex.value / uploadTotal.value) * 100)
+    : 0,
+);
 
 /** 解析批上传的目标父文件夹 id */
 function resolveDropTargetFolderId(): { id: string | null; name: string } {
@@ -271,11 +281,16 @@ async function onNativeDrop(e: DragEvent) {
   }
 
   nativeDropUploading.value = true;
+  uploadTotal.value = fileArr.length;
+  uploadIndex.value = 0;
+  uploadCurrentName.value = '';
   let okCount = 0;
   const pid = props.projectId;
 
   // 顺序上传：FileReader + 后端调用串行，避免一次性把大文件全读进内存
-  for (const f of fileArr) {
+  for (let i = 0; i < fileArr.length; i++) {
+    const f = fileArr[i];
+    uploadCurrentName.value = f.name;
     try {
       const mime = inferMimeFromName(f.name);
       let content: string | undefined;
@@ -298,9 +313,13 @@ async function onNativeDrop(e: DragEvent) {
       console.error('[FileTree native drop] upload failed', f.name, err);
       message.error(`上传失败：${f.name}`);
     }
+    uploadIndex.value = i + 1;  // 完成第 i+1 个
   }
 
   nativeDropUploading.value = false;
+  uploadCurrentName.value = '';
+  uploadIndex.value = 0;
+  uploadTotal.value = 0;
   if (okCount > 0) {
     message.success(`已上传 ${okCount} 个文件到 ${targetName}`);
   }
@@ -565,9 +584,21 @@ function renderNodeTitle(node: AntdTreeNode) {
       @drop="onNativeDrop"
     >
       <!-- 拖拽叠层提示 -->
-      <div v-if="nativeDropActive" class="pp-tree-drop-overlay">
+      <div v-if="nativeDropActive && !nativeDropUploading" class="pp-tree-drop-overlay">
         <div class="pp-tree-drop-hint">
           释放以上传 {{ nativeDropCount > 0 ? nativeDropCount : '' }} 个文件
+        </div>
+      </div>
+      <!-- v0.14-B: 上传进度叠层 -->
+      <div v-if="nativeDropUploading" class="pp-tree-upload-overlay">
+        <div class="pp-tree-upload-card">
+          <div class="pp-tree-upload-title">
+            上传中 {{ uploadIndex }} / {{ uploadTotal }}
+          </div>
+          <div class="pp-tree-upload-name" :title="uploadCurrentName">
+            {{ uploadCurrentName || '准备中…' }}
+          </div>
+          <AProgress :percent="uploadPercent" size="small" status="active" />
         </div>
       </div>
       <ADropdown :trigger="['contextmenu']">
@@ -679,6 +710,40 @@ function renderNodeTitle(node: AntdTreeNode) {
   padding: 6px 14px;
   border-radius: 16px;
   box-shadow: 0 2px 8px rgba(22, 119, 255, 0.35);
+}
+/* v0.14-B: 上传进度叠层 */
+.pp-tree-upload-overlay {
+  position: absolute;
+  inset: 6px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(255, 255, 255, 0.85);
+  border-radius: 4px;
+  z-index: 6;
+  pointer-events: all;
+}
+.pp-tree-upload-card {
+  background: #fff;
+  border: 1px solid #e6e6e6;
+  border-radius: 8px;
+  padding: 14px 16px;
+  width: min(85%, 280px);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.08);
+}
+.pp-tree-upload-title {
+  font-size: 12px;
+  color: #666;
+  font-weight: 600;
+  margin-bottom: 4px;
+}
+.pp-tree-upload-name {
+  font-size: 13px;
+  color: #1f1f1f;
+  margin-bottom: 8px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 /* 多行显示：节点 title 换行 */
 :deep(.pp-tree-wrap .ant-tree-node-content-wrapper) {
