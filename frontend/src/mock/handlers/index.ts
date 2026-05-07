@@ -1,8 +1,15 @@
 import { http, HttpResponse } from 'msw';
+import { authHandlers } from './auth';
+import { projectsHandlers } from './projects';
+import { searchHandlers } from './search';
+import { disclosureHandlers } from './disclosure';
+import { chatHandlers } from './chat';
 
-// 占位 handlers，Task 7-8 会扩充
 export const handlers = [
-  http.get('/api/ping', () =>
-    HttpResponse.json({ ok: true, msg: 'msw working' })
-  ),
+  http.get('/api/ping', () => HttpResponse.json({ ok: true, msg: 'msw working' })),
+  ...authHandlers,
+  ...projectsHandlers,
+  ...searchHandlers,
+  ...disclosureHandlers,
+  ...chatHandlers,
 ];

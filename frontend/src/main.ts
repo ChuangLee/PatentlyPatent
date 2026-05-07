@@ -4,6 +4,7 @@ import Antd from 'ant-design-vue';
 import 'ant-design-vue/dist/reset.css';
 import './styles/tokens.css';
 import App from './App.vue';
+import { createAppRouter } from './router';
 
 async function enableMocking() {
   if (import.meta.env.MODE === 'test') return;
@@ -18,8 +19,8 @@ async function bootstrap() {
   await enableMocking();
   const app = createApp(App);
   app.use(createPinia());
+  app.use(createAppRouter());
   app.use(Antd);
-  // router 在 Task 9 接入
   app.mount('#app');
 }
 
