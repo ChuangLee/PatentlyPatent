@@ -61,6 +61,8 @@ const hits: PriorArtHit[] = [
     comparison: { problem: '不相关（认证 vs 网关）', means: '认证因子打分', effect: '登录风控' } },
 ];
 
+import { FILE_TREES, INTAKE_ANSWERS } from './file_trees';
+
 export const CASE_INFOSEC: Project = {
   id: 'p-infosec-001',
   title: '一种基于多信号融合行为基线的 API 网关异常请求检测方法与系统',
@@ -70,6 +72,8 @@ export const CASE_INFOSEC: Project = {
   ownerId: 'u1',
   createdAt: '2026-04-20T10:00:00Z',
   updatedAt: '2026-04-25T16:20:00Z',
+  intake: INTAKE_ANSWERS['p-infosec-001'],
+  fileTree: FILE_TREES['p-infosec-001'],
   miningSummary: {
     field: ['信息安全', 'API 网关', '异常请求检测', '行为基线'],
     problem: ['单一信号检测误报高', '固定阈值无法适应业务波动', '账号维度异常调用难以识别'],

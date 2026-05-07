@@ -35,7 +35,7 @@ const columns = [
 onMounted(async () => { projects.value = await projectsApi.list(); });
 
 function viewProject(p: Project) {
-  router.push(`/employee/projects/${p.id}/disclosure`);
+  router.push(`/employee/projects/${p.id}/workbench`);
 }
 </script>
 

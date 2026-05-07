@@ -61,6 +61,8 @@ const hits: PriorArtHit[] = [
     comparison: { problem: '签名不是 KEM', means: 'Falcon 签名', effect: '不相关' } },
 ];
 
+import { FILE_TREES, INTAKE_ANSWERS } from './file_trees';
+
 export const CASE_CRYPTO: Project = {
   id: 'p-crypto-001',
   title: '一种基于 Kyber-512 NTT 并行优化的轻量级 PQC KEM 实现',
@@ -70,6 +72,8 @@ export const CASE_CRYPTO: Project = {
   ownerId: 'u1',
   createdAt: '2026-05-01T09:00:00Z',
   updatedAt: '2026-05-04T15:30:00Z',
+  intake: INTAKE_ANSWERS['p-crypto-001'],
+  fileTree: FILE_TREES['p-crypto-001'],
   miningSummary: {
     field: ['后量子密码', 'Kyber-512', 'NTT', 'ARM Cortex-M4'],
     problem: ['NTT 在嵌入式平台速度瓶颈', 'PQClean 标量实现性能不足'],

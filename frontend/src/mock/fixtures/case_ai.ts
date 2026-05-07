@@ -61,6 +61,8 @@ const hits: PriorArtHit[] = [
     comparison: { problem: '不相关（业务分层而非调度）', means: '用户分层规则', effect: '推荐策略' } },
 ];
 
+import { FILE_TREES, INTAKE_ANSWERS } from './file_trees';
+
 export const CASE_AI: Project = {
   id: 'p-ai-001',
   title: '一种基于 KV-cache 分页与请求级动态调度的大模型推理批处理方法',
@@ -70,6 +72,8 @@ export const CASE_AI: Project = {
   ownerId: 'u1',
   createdAt: '2026-05-03T14:00:00Z',
   updatedAt: '2026-05-06T11:00:00Z',
+  intake: INTAKE_ANSWERS['p-ai-001'],
+  fileTree: FILE_TREES['p-ai-001'],
   miningSummary: {
     field: ['大模型推理', 'KV-cache 管理', '推理服务调度'],
     problem: ['LLM 推理 batch 内序列长度差异引起 padding 浪费', '高价值请求与普通请求混合时尾延迟不可控'],

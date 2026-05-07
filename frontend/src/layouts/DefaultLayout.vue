@@ -23,7 +23,7 @@ const menuItems = computed<MenuItem[]>(() => {
   }
   return [
     { key: '/employee/dashboard', label: '我的项目', icon: '📋' },
-    { key: '/employee/projects/new', label: '+ 新建报门', icon: '✨' },
+    { key: '/employee/dashboard?new=1', label: '+ 新建报门', icon: '✨' },
   ];
 });
 

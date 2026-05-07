@@ -95,10 +95,49 @@ export interface Project {
   ownerId: string;
   createdAt: string;
   updatedAt: string;
-  attachments?: Attachment[];           // 报门时上传的资料
+  attachments?: Attachment[];           // 旧字段，逐步迁入 fileTree
+  intake?: IntakeAnswers;               // 报门时回答的关键问题
+  fileTree?: FileNode[];                // 项目文件树（mid-fi mock 全在前端）
   miningSummary?: MiningSummary;
   searchReport?: SearchReport;
   disclosure?: Disclosure;
+}
+
+// 文件树节点
+export type FileNodeKind = 'folder' | 'file';
+export type FileSource = 'user' | 'ai' | 'system';
+export type FileMime =
+  | 'text/markdown'
+  | 'text/plain'
+  | 'application/json'
+  | 'image/png' | 'image/jpeg' | 'image/svg+xml'
+  | 'application/pdf'
+  | 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' // docx
+  | 'text/x-link';                                    // 自造类型表示链接
+
+export interface FileNode {
+  id: string;
+  name: string;
+  kind: FileNodeKind;
+  parentId: string | null;          // 根节点 null
+  source: FileSource;
+  hidden?: boolean;                 // .ai-internal/ 等隐藏文件夹默认 true
+  mime?: FileMime;
+  size?: number;
+  content?: string;                 // 内联文本内容（md/txt/json）
+  url?: string;                     // 外链 / 占位下载
+  createdAt: string;
+  updatedAt: string;
+}
+
+// 报门关键问题答案（3 个）
+export type ProjectStage = 'idea' | 'prototype' | 'deployed';
+export type ProjectGoal = 'search_only' | 'full_disclosure' | 'specific_section';
+
+export interface IntakeAnswers {
+  stage: ProjectStage;            // 创意 / 原型 / 已落地
+  goal: ProjectGoal;              // 期望产出
+  notes?: string;                 // 自由补充
 }
 
 // SSE 事件类型
@@ -106,4 +145,5 @@ export type ChatStreamEvent =
   | { type: 'thinking' }
   | { type: 'delta'; chunk: string }
   | { type: 'fields'; captured: string[] }
+  | { type: 'file'; node: FileNode }   // agent 在文件树上 spawn 一个文件
   | { type: 'done' };

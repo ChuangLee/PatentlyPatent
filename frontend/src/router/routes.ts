@@ -24,12 +24,15 @@ export const routes: RouteRecordRaw[] = [
         component: () => import('@/views/employee/Dashboard.vue').catch(() => Empty()) },
       { path: 'projects/new', name: 'project-new',
         component: () => import('@/views/employee/ProjectNew.vue').catch(() => Empty()) },
-      { path: 'projects/:id/mining', name: 'project-mining',
-        component: () => import('@/views/employee/ProjectMining.vue').catch(() => Empty()) },
-      { path: 'projects/:id/search', name: 'project-search',
-        component: () => import('@/views/employee/ProjectSearch.vue').catch(() => Empty()) },
-      { path: 'projects/:id/disclosure', name: 'project-disclosure',
-        component: () => import('@/views/employee/ProjectDisclosure.vue').catch(() => Empty()) },
+
+      // 新：统一工作台
+      { path: 'projects/:id/workbench', name: 'project-workbench',
+        component: () => import('@/views/employee/ProjectWorkbench.vue').catch(() => Empty()) },
+
+      // 旧路由：保留但重定向到 workbench（让旧链接不 404）
+      { path: 'projects/:id/mining', redirect: to => `/employee/projects/${to.params.id}/workbench` },
+      { path: 'projects/:id/search', redirect: to => `/employee/projects/${to.params.id}/workbench` },
+      { path: 'projects/:id/disclosure', redirect: to => `/employee/projects/${to.params.id}/workbench` },
     ],
   },
 

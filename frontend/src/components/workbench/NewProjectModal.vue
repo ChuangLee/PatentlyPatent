@@ -1,0 +1,209 @@
+<script setup lang="ts">
+import { ref, reactive, computed } from 'vue';
+import { useRouter } from 'vue-router';
+import { message } from 'ant-design-vue';
+import { projectsApi } from '@/api/projects';
+import { useAuthStore } from '@/stores/auth';
+import type { Domain, ProjectStage, ProjectGoal, Attachment } from '@/types';
+
+defineProps<{ open: boolean }>();
+const emit = defineEmits<{ (e: 'update:open', v: boolean): void; (e: 'created', id: string): void }>();
+
+const router = useRouter();
+const auth = useAuthStore();
+const submitting = ref(false);
+
+const form = reactive({
+  title: '',
+  domain: 'other' as Domain,
+  stage: 'idea' as ProjectStage,
+  goal: 'full_disclosure' as ProjectGoal,
+  notes: '',
+});
+
+const attachments = ref<Attachment[]>([]);
+
+const DOMAINS: { value: Domain; label: string }[] = [
+  { value: 'cryptography', label: '密码学' },
+  { value: 'infosec', label: '信息安全' },
+  { value: 'ai', label: '人工智能' },
+  { value: 'other', label: '其他' },
+];
+
+const STAGES: { value: ProjectStage; label: string; icon: string }[] = [
+  { value: 'idea',      label: '只是创意 · 还在脑子里', icon: '💡' },
+  { value: 'prototype', label: '已有原型/Demo',         icon: '🛠️' },
+  { value: 'deployed',  label: '已落地/上线',           icon: '🚀' },
+];
+
+const GOALS: { value: ProjectGoal; label: string; desc: string }[] = [
+  { value: 'search_only',      label: '先看下值不值得申请', desc: '只跑现有技术检索 + 初步专利性判断' },
+  { value: 'full_disclosure',  label: '完整专利交底书',     desc: '跑全流程，最终输出 .docx' },
+  { value: 'specific_section', label: '特定章节或问题',      desc: '在 AI 对话中告诉助手具体要什么' },
+];
+
+const attachmentCount = computed(() => attachments.value.length);
+
+function genId() { return `att-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`; }
+
+function beforeUpload(file: File) {
+  attachments.value.push({
+    id: genId(), type: 'file',
+    name: file.name, size: file.size, mime: file.type || 'application/octet-stream',
+    addedAt: new Date().toISOString(),
+  });
+  return false;
+}
+
+function removeAt(id: string) {
+  attachments.value = attachments.value.filter(a => a.id !== id);
+}
+
+function fileIcon(mime?: string): string {
+  if (!mime) return '📦';
+  if (mime.startsWith('image/')) return '🖼️';
+  if (mime.includes('pdf')) return '📑';
+  if (mime.includes('word') || mime.includes('officedocument')) return '📝';
+  if (mime.includes('text/markdown') || mime.includes('plain')) return '📄';
+  if (mime.includes('zip') || mime.includes('rar')) return '🗜️';
+  if (mime.includes('json') || mime.includes('javascript') || mime.includes('python')) return '💻';
+  return '📦';
+}
+
+function fmtSize(b?: number): string {
+  if (b == null) return '';
+  if (b < 1024) return `${b} B`;
+  if (b < 1024 * 1024) return `${(b / 1024).toFixed(1)} KB`;
+  return `${(b / 1024 / 1024).toFixed(1)} MB`;
+}
+
+function reset() {
+  form.title = '';
+  form.domain = 'other';
+  form.stage = 'idea';
+  form.goal = 'full_disclosure';
+  form.notes = '';
+  attachments.value = [];
+}
+
+async function onOk() {
+  if (form.title.trim().length < 4) {
+    message.warning('请填项目标题（至少 4 字）');
+    return;
+  }
+  submitting.value = true;
+  try {
+    const description = form.notes.trim() || `（员工于报门时未填补充说明）领域=${form.domain}, 阶段=${form.stage}, 期望=${form.goal}`;
+    const p = await projectsApi.create({
+      title: form.title.trim(),
+      description,
+      domain: form.domain,
+      ownerId: auth.user!.id,
+      attachments: attachments.value.length ? attachments.value : undefined,
+    });
+    message.success('已创建，进入项目工作台');
+    emit('created', p.id);
+    emit('update:open', false);
+    reset();
+    router.push(`/employee/projects/${p.id}/workbench`);
+  } catch (e) {
+    message.error('创建失败：' + (e as Error).message);
+  } finally {
+    submitting.value = false;
+  }
+}
+
+function onCancel() {
+  emit('update:open', false);
+}
+</script>
+
+<template>
+  <a-modal :open="open" @update:open="(v: boolean) => emit('update:open', v)"
+           title="新建创新报门" width="780" :ok-text="`确定 (${attachmentCount} 项资料)`"
+           :ok-button-props="{ loading: submitting }"
+           @ok="onOk" @cancel="onCancel" :mask-closable="false">
+
+    <a-form layout="vertical">
+      <!-- 大文件上传区 -->
+      <div class="pp-upload-hero">
+        <h3 style="margin:0 0 4px 0;font-size:15px">📎 你可以把和创意有关的文档、代码、图像等各种资料都扔到这里</h3>
+        <p style="color:#888;font-size:12px;margin:0 0 12px">PDF / Word / 代码 / 图片 / 设计稿都行；越多越好，AI 会自动分析。</p>
+        <a-upload-dragger
+          name="file"
+          :multiple="true"
+          :before-upload="beforeUpload"
+          :show-upload-list="false"
+          accept=".pdf,.doc,.docx,.md,.txt,.png,.jpg,.jpeg,.svg,.json,.py,.js,.ts,.zip,.tar,.gz"
+        >
+          <p class="ant-upload-drag-icon" style="font-size:36px;margin:8px 0">📎</p>
+          <p class="ant-upload-text">点击或拖拽文件到此区域</p>
+          <p class="ant-upload-hint">支持 pdf / doc / docx / md / txt / 图片 / 代码 / 压缩包，可多选</p>
+        </a-upload-dragger>
+
+        <a-list v-if="attachmentCount" size="small" bordered :data-source="attachments" style="margin-top:12px">
+          <template #renderItem="{ item }: { item: Attachment }">
+            <a-list-item>
+              <template #actions>
+                <a-button type="link" danger size="small" @click="removeAt(item.id)">移除</a-button>
+              </template>
+              <span style="margin-right:8px">{{ fileIcon(item.mime) }}</span>
+              <span style="margin-right:8px">{{ item.name }}</span>
+              <span style="color:#999;font-size:12px">{{ fmtSize(item.size) }}</span>
+            </a-list-item>
+          </template>
+        </a-list>
+      </div>
+
+      <a-divider />
+
+      <a-form-item label="项目标题" required>
+        <a-input v-model:value="form.title" placeholder="一句话描述你的创新点" :maxlength="60" show-count />
+      </a-form-item>
+
+      <a-row :gutter="16">
+        <a-col :span="12">
+          <a-form-item label="技术领域" required>
+            <a-select v-model:value="form.domain">
+              <a-select-option v-for="d in DOMAINS" :key="d.value" :value="d.value">{{ d.label }}</a-select-option>
+            </a-select>
+          </a-form-item>
+        </a-col>
+        <a-col :span="12">
+          <a-form-item label="当前阶段" required>
+            <a-select v-model:value="form.stage">
+              <a-select-option v-for="s in STAGES" :key="s.value" :value="s.value">
+                {{ s.icon }} {{ s.label }}
+              </a-select-option>
+            </a-select>
+          </a-form-item>
+        </a-col>
+      </a-row>
+
+      <a-form-item label="期望 AI 帮你做什么">
+        <a-radio-group v-model:value="form.goal">
+          <a-space direction="vertical" style="width:100%">
+            <a-radio v-for="g in GOALS" :key="g.value" :value="g.value">
+              <strong>{{ g.label }}</strong>
+              <span style="color:#888;font-size:12px;margin-left:8px">{{ g.desc }}</span>
+            </a-radio>
+          </a-space>
+        </a-radio-group>
+      </a-form-item>
+
+      <a-form-item label="补充说明（可选）">
+        <a-textarea v-model:value="form.notes" :rows="3"
+                    placeholder="比如：方案的核心区别、想规避哪家专利、特定章节细节…" />
+      </a-form-item>
+    </a-form>
+  </a-modal>
+</template>
+
+<style scoped>
+.pp-upload-hero {
+  background: #fafbff;
+  border: 1px dashed #c2c8ff;
+  border-radius: 8px;
+  padding: 16px;
+}
+</style>

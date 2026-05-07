@@ -1,19 +1,37 @@
 <script setup lang="ts">
-import { onMounted, ref } from 'vue';
-import { useRouter } from 'vue-router';
+import { onMounted, ref, watch } from 'vue';
+import { useRouter, useRoute } from 'vue-router';
 import { projectsApi } from '@/api/projects';
 import { useAuthStore } from '@/stores/auth';
+import NewProjectModal from '@/components/workbench/NewProjectModal.vue';
 import type { Project, ProjectStatus } from '@/types';
 
 const router = useRouter();
+const route = useRoute();
 const auth = useAuthStore();
 const projects = ref<Project[]>([]);
 const loading = ref(true);
+const modalOpen = ref(false);
 
-onMounted(async () => {
+async function refresh() {
   loading.value = true;
   projects.value = await projectsApi.list({ ownerId: auth.user!.id });
   loading.value = false;
+}
+
+onMounted(() => {
+  refresh();
+  if (route.query.new === '1') {
+    modalOpen.value = true;
+    router.replace({ path: route.path, query: {} });
+  }
+});
+
+watch(() => route.query.new, (v) => {
+  if (v === '1') {
+    modalOpen.value = true;
+    router.replace({ path: route.path, query: {} });
+  }
 });
 
 const STATUS_LABEL: Record<ProjectStatus, { text: string; color: string }> = {
@@ -24,19 +42,14 @@ const STATUS_LABEL: Record<ProjectStatus, { text: string; color: string }> = {
 };
 
 function go(p: Project) {
-  if (p.status === 'drafting' || p.status === 'researching')
-    router.push(`/employee/projects/${p.id}/mining`);
-  else if (p.status === 'reporting')
-    router.push(`/employee/projects/${p.id}/search`);
-  else router.push(`/employee/projects/${p.id}/disclosure`);
+  router.push(`/employee/projects/${p.id}/workbench`);
 }
 </script>
 
 <template>
   <a-page-header title="我的创新项目" sub-title="把工作中发现的创新点报上来，AI 帮你拆解并起草交底书" />
 
-  <a-button type="primary" size="large" style="margin-bottom:24px"
-            @click="router.push('/employee/projects/new')">
+  <a-button type="primary" size="large" style="margin-bottom:24px" @click="modalOpen = true">
     ✨ 新建报门
   </a-button>
 
@@ -56,4 +69,6 @@ function go(p: Project) {
       </a-col>
     </a-row>
   </a-spin>
+
+  <NewProjectModal v-model:open="modalOpen" @created="refresh" />
 </template>
