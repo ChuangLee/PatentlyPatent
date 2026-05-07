@@ -121,3 +121,25 @@ title: PatentlyPatent 迭代日志
 - 后端按 fileNode.parentId 收集"我的资料/"下用户上传的文件作 chat 上下文
 - 更细的拖拽视觉：hover 持续高亮（目前 dragenter 后切到别的 folder 才更新）
 
+
+## v0.12 · 2026-05-08 03:00 · 进度可视化 + 流式取消 + 用户资料注入 + 拖拽 hover 持续
+
+**调研**
+- ROI: A 进度小 / B 流式取消中 / C 用户资料注入小 / D hover 持续小 → B 派 subagent，A+C+D 自做并行
+
+**实现**
+- A. DefaultLayout sidebar：项目卡片元信息加 4 段点状进度（drafting=1/4 → completed=4/4），蓝点+发光，状态文字 tag
+- B. (subagent) 流式取消：sse.ts/api/chat.ts 三层透传 AbortSignal；AgentChatStream 加 currentAbort + 🛑 取消按钮；AbortError 静默 return
+- C. backend chat.py 在 v0.11-B 基础上扩展：除 'AI 输出/' 章节摘要，加 '我的资料/' 用户上传文件（前 6 项 × 400 字 + 链接/二进制元信息）拼到 sys_prompt
+- D. FileTree 拖拽 hover 持续高亮：dragenter + dragover 双事件（dragover 每 ~50ms 触发更稳），换 setDragTarget() 公共函数；切到子节点不丢失父高亮
+
+**测试**
+- pnpm test 35/35 / build / vue-tsc 严格无错
+- 公网 e2e：写入 user 资料文件后 chat 44 events 正常 SSE 流（sys_prompt 已注入）
+
+**下轮目标 (v0.13)**
+- 把"我的资料/"上传支持拖拽 + 多文件批上传（FilePreviewer 或 FileTree 加 drop zone）
+- 项目卡片右键菜单（重命名/删除/归档）
+- 后端加 SQLite WAL + index（status, owner_id, parent_id 多查询）
+- 流式取消 e2e 真实测试（curl --max-time + abort 模拟）
+

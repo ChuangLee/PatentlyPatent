@@ -228,18 +228,35 @@ type DropInfo = {
   dropPosition: number;
 };
 
-// v0.11-D: 拖拽过程的目标 key（高亮文件夹）
+// v0.11-D + v0.12-D: 拖拽过程目标 key 持续高亮
+// 用 dragover 而非 dragenter（dragenter 切到子节点会丢失父高亮；dragover 每 ~50ms 触发一次更稳）
 const dragOverKey = ref<string | null>(null);
 
-function onDragEnter(info: { node: { key: string | number; dataRef?: { isLeaf?: boolean } } }) {
-  const k = String(info.node.key);
-  // 只高亮 folder 节点
+function setDragTarget(key: string | number | null | undefined) {
+  if (!key) {
+    dragOverKey.value = null;
+    return;
+  }
+  const k = String(key);
   const node = files.getNode(k);
-  dragOverKey.value = node?.kind === 'folder' ? k : null;
+  // 只高亮 folder 节点
+  if (node?.kind === 'folder' && dragOverKey.value !== k) {
+    dragOverKey.value = k;
+  } else if (!node || node.kind !== 'folder') {
+    dragOverKey.value = null;
+  }
+}
+
+function onDragEnter(info: { node: { key: string | number } }) {
+  setDragTarget(info.node.key);
+}
+
+function onDragOver(info: { node: { key: string | number } }) {
+  setDragTarget(info.node.key);
 }
 
 function onDragLeave() {
-  // a-tree 的 dragLeave 节流不稳，统一在 drop/dragEnd 清掉
+  // 不在此清掉（dragover 仍会立刻覆盖正确目标）
 }
 
 function onDragEnd() {
@@ -451,6 +468,7 @@ function renderNodeTitle(node: AntdTreeNode) {
             @check="onCheck"
             @drop="onDrop"
             @dragenter="onDragEnter"
+            @dragover="onDragOver"
             @dragleave="onDragLeave"
             @dragend="onDragEnd"
           >

@@ -128,26 +128,54 @@ async def chat_stream(pid: str, body: ChatRequest, db: Session = Depends(get_db)
 
     domain_label = p.custom_domain or p.domain
 
-    # v0.11-B: 把项目"AI 输出/" 下已生成的 md 摘要拼入 system prompt（每文件取前 600 字）
+    # v0.11-B + v0.12-C: AI 输出/ 章节摘要 + 我的资料/ 用户上传文件摘要
+    user_root = db.query(FileNode).filter(
+        FileNode.project_id == pid,
+        FileNode.parent_id.is_(None),
+        FileNode.source == "user",
+    ).first()
+    user_files = []
+    if user_root:
+        user_files = db.query(FileNode).filter(
+            FileNode.project_id == pid,
+            FileNode.parent_id == user_root.id,
+            FileNode.kind == "file",
+        ).all()
+
     ai_files = db.query(FileNode).filter(
         FileNode.project_id == pid,
         FileNode.source == "ai",
         FileNode.kind == "file",
     ).order_by(FileNode.name).all()
-    ctx_blocks: list[str] = []
-    for f in ai_files[:8]:  # 最多 8 个文件，避免 prompt 太长
+
+    ai_blocks: list[str] = []
+    for f in ai_files[:8]:
         snip = (f.content or "")[:600]
         if snip:
-            ctx_blocks.append(f"### {f.name}\n{snip}")
-    ctx_str = "\n\n".join(ctx_blocks) or "（暂无 AI 已生成内容）"
+            ai_blocks.append(f"### {f.name}\n{snip}")
+    ai_ctx = "\n\n".join(ai_blocks) or "（暂无 AI 已生成内容）"
+
+    user_blocks: list[str] = []
+    for f in user_files[:6]:
+        if f.content:
+            user_blocks.append(f"### {f.name}（用户上传）\n{f.content[:400]}")
+        elif f.url:
+            user_blocks.append(f"- {f.name}（链接：{f.url}）")
+        else:
+            user_blocks.append(f"- {f.name}（{f.mime or '二进制'} · {f.size or '?'} bytes）")
+    user_ctx = "\n\n".join(user_blocks) or "（用户暂未上传辅助资料）"
 
     sys_prompt = (
         f"你是企业内部的专利挖掘助手。当前项目：《{p.title}》（{domain_label}）。\n"
         f"用户报门描述：{p.description}\n\n"
         "─── 已生成的交底书章节摘要（基于此回答用户问题，保持上下文连贯）───\n"
-        f"{ctx_str}\n"
-        "─── 摘要结束 ───\n\n"
-        "请用专业、简洁的中文回答；优先引用上述章节中的具体内容；"
+        f"{ai_ctx}\n"
+        "─── AI 章节摘要结束 ───\n\n"
+        "─── 用户上传的辅助资料（"
+        f"{len(user_files)} 项 · 最多取前 6）───\n"
+        f"{user_ctx}\n"
+        "─── 用户资料结束 ───\n\n"
+        "请用专业、简洁的中文回答；优先引用上述章节中的具体内容与用户资料；"
         "回答末尾如有可写回的具体信息（实验数据/替代方案/资料链接），用一行"
         "「✅ 建议归档：...」总结。"
     )

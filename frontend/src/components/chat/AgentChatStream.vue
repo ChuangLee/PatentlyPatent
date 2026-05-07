@@ -12,6 +12,15 @@ const chat = useChatStore();
 const files = useFilesStore();
 const input = ref('');
 const containerRef = ref<HTMLElement | null>(null);
+let currentAbort: AbortController | null = null;
+
+function cancelStream() {
+  if (currentAbort) {
+    currentAbort.abort();
+    currentAbort = null;
+    chat.endAgent();
+  }
+}
 
 watch(() => chat.messages.length, () => {
   nextTick(() => {
@@ -26,41 +35,51 @@ async function send() {
   input.value = '';
   chat.startAgent();
 
-  await chatApi.stream(props.projectId, props.round, text, e => {
-    if (e.type === 'delta') chat.appendDelta(e.chunk);
-    else if (e.type === 'fields') {
-      chat.applyFields(e.captured);
-      emit('roundComplete', e.captured);
-    } else if (e.type === 'file') {
-      // AI 在文件树上 spawn / 更新文件 → 同时自动选中让右栏预览
-      const existing = files.tree.find(n => n.id === e.node.id);
-      if (existing) {
-        // 已存在节点更新（用户答写回时 fileNode.content 改了）
-        Object.assign(existing, e.node);
-      } else {
-        files.pushNode(e.node);
+  currentAbort = new AbortController();
+  try {
+    await chatApi.stream(props.projectId, props.round, text, e => {
+      if (e.type === 'delta') chat.appendDelta(e.chunk);
+      else if (e.type === 'fields') {
+        chat.applyFields(e.captured);
+        emit('roundComplete', e.captured);
+      } else if (e.type === 'file') {
+        // AI 在文件树上 spawn / 更新文件 → 同时自动选中让右栏预览
+        const existing = files.tree.find(n => n.id === e.node.id);
+        if (existing) {
+          // 已存在节点更新（用户答写回时 fileNode.content 改了）
+          Object.assign(existing, e.node);
+        } else {
+          files.pushNode(e.node);
+        }
+        files.selectFile(e.node.id);
+      } else if (e.type === 'done') {
+        chat.endAgent();
       }
-      files.selectFile(e.node.id);
-    } else if (e.type === 'done') {
-      chat.endAgent();
-    }
-  });
+    }, currentAbort.signal);
+  } finally {
+    currentAbort = null;
+  }
 }
 
 /** 由父组件（ProjectWorkbench）调，进入工作台时自动跑挖掘流程 */
 async function autoMine(ctx: Parameters<typeof chatApi.autoMine>[1]) {
   if (chat.streaming) return;
   chat.startAgent();
-  await chatApi.autoMine(props.projectId, ctx, e => {
-    if (e.type === 'delta') chat.appendDelta(e.chunk);
-    else if (e.type === 'file') {
-      const existing = files.tree.find(n => n.id === e.node.id);
-      if (existing) Object.assign(existing, e.node);
-      else files.pushNode(e.node);
-      files.selectFile(e.node.id);     // 流式生成时实时切到新文件
-    }
-    else if (e.type === 'done') chat.endAgent();
-  });
+  currentAbort = new AbortController();
+  try {
+    await chatApi.autoMine(props.projectId, ctx, e => {
+      if (e.type === 'delta') chat.appendDelta(e.chunk);
+      else if (e.type === 'file') {
+        const existing = files.tree.find(n => n.id === e.node.id);
+        if (existing) Object.assign(existing, e.node);
+        else files.pushNode(e.node);
+        files.selectFile(e.node.id);     // 流式生成时实时切到新文件
+      }
+      else if (e.type === 'done') chat.endAgent();
+    }, currentAbort.signal);
+  } finally {
+    currentAbort = null;
+  }
 }
 
 defineExpose({ autoMine });
@@ -98,6 +117,7 @@ defineExpose({ autoMine });
         <Input v-model:value="input" placeholder="描述你的发明，或回答 AI 的问题..."
                :disabled="chat.streaming" @press-enter="send" />
         <Button type="primary" :loading="chat.streaming" @click="send">发送</Button>
+        <Button v-if="chat.streaming" danger @click="cancelStream">🛑 取消</Button>
       </div>
     </div>
   </div>

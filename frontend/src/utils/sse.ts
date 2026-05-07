@@ -7,26 +7,33 @@ export async function consumeSSE(
   url: string,
   init: RequestInit,
   onEvent: (event: ChatStreamEvent) => void,
+  signal?: AbortSignal,
 ): Promise<void> {
-  const res = await fetch(url, init);
-  if (!res.body) throw new Error('SSE: response has no body');
+  try {
+    const res = await fetch(url, { ...init, signal });
+    if (!res.body) throw new Error('SSE: response has no body');
 
-  const reader = res.body.getReader();
-  const decoder = new TextDecoder();
-  let buffer = '';
+    const reader = res.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = '';
 
-  while (true) {
-    const { value, done } = await reader.read();
-    if (done) break;
-    buffer += decoder.decode(value, { stream: true });
+    while (true) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
 
-    // SSE event 以 \n\n 分隔
-    const events = buffer.split('\n\n');
-    buffer = events.pop() ?? '';
-    for (const block of events) {
-      const ev = parseSSEBlock(block);
-      if (ev) onEvent(ev);
+      // SSE event 以 \n\n 分隔
+      const events = buffer.split('\n\n');
+      buffer = events.pop() ?? '';
+      for (const block of events) {
+        const ev = parseSSEBlock(block);
+        if (ev) onEvent(ev);
+      }
     }
+  } catch (err: any) {
+    // 用户主动 abort：静默返回，不抛错
+    if (err?.name === 'AbortError') return;
+    throw err;
   }
 }
 

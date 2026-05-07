@@ -43,6 +43,16 @@ const STATUS_COLOR: Record<ProjectStatus, string> = {
   completed: 'success',
 };
 
+const STATUS_LABEL: Record<ProjectStatus, string> = {
+  drafting: '草稿', researching: '挖掘中', reporting: '检索完成', completed: '已完成',
+};
+
+/** v0.12-A: 4 段点状进度（drafting=1/4, researching=2/4, reporting=3/4, completed=4/4） */
+function stageDots(s: ProjectStatus): boolean[] {
+  const lvl = { drafting: 1, researching: 2, reporting: 3, completed: 4 }[s] ?? 0;
+  return [0, 1, 2, 3].map(i => i < lvl);
+}
+
 // 当前路由是否在某项目工作台内（决定是否高亮文件树/隐藏空态）
 const currentProjectId = computed(() => {
   const m = route.path.match(/\/projects\/([^/]+)\//);
@@ -107,7 +117,14 @@ function onMenuClick({ key }: { key: string }) {
                    @click="goProject(p)">
                 <div class="pp-proj-title">{{ p.title }}</div>
                 <div class="pp-proj-meta">
-                  <a-tag :color="STATUS_COLOR[p.status]" style="margin:0">{{ p.domain }}</a-tag>
+                  <!-- v0.12-A: 4 段进度徽章（报门→挖掘→检索→完成） -->
+                  <span class="pp-stage" :title="STATUS_LABEL[p.status]">
+                    <span v-for="(filled, i) in stageDots(p.status)" :key="i"
+                          class="pp-dot" :class="{ on: filled }" />
+                  </span>
+                  <a-tag :color="STATUS_COLOR[p.status]" style="margin:0 0 0 6px;font-size:11px">
+                    {{ STATUS_LABEL[p.status] }}
+                  </a-tag>
                 </div>
               </div>
             </div>
@@ -213,6 +230,23 @@ function onMenuClick({ key }: { key: string }) {
 .pp-proj-active {
   background: #e6f0ff;
   border-color: #91caff;
+}
+/* v0.12-A: 阶段点 */
+.pp-stage {
+  display: inline-flex;
+  gap: 3px;
+  vertical-align: middle;
+}
+.pp-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #d9d9d9;
+  display: inline-block;
+}
+.pp-dot.on {
+  background: #1677ff;
+  box-shadow: 0 0 4px rgba(22, 119, 255, 0.4);
 }
 .pp-proj-title {
   font-size: 13px;
