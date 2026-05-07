@@ -1,0 +1,19 @@
+# 把以下 location 块加到 /etc/nginx/conf.d/3xui.conf 的 server_name blind.pub 块内
+# 必须放在原 location /patent/ {...} 之前（更具体的路径优先匹配）
+
+location /patent/api/ {
+    rewrite ^/patent/api/(.*)$ /api/$1 break;
+    proxy_pass http://127.0.0.1:8088;
+    proxy_http_version 1.1;
+    proxy_set_header Host $host;
+    proxy_set_header X-Real-IP $remote_addr;
+    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    proxy_set_header X-Forwarded-Proto $scheme;
+
+    # SSE 流式：禁 buffer + 长超时
+    proxy_buffering off;
+    proxy_cache off;
+    proxy_read_timeout 3600s;
+    proxy_send_timeout 3600s;
+    chunked_transfer_encoding off;
+}

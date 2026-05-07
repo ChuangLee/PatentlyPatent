@@ -46,3 +46,6 @@ oa_response.md
 
 # Third-party templates (unverified copyright)
 templates/
+backend/patentlypatent.db
+backend/storage/
+backend/.venv/
