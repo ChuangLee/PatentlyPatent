@@ -120,7 +120,7 @@ function onCancel() {
 
 <template>
   <a-modal :open="open" @update:open="(v: boolean) => emit('update:open', v)"
-           title="新建创新报门" width="780" :ok-text="`确定 (${attachmentCount} 项资料)`"
+           title="新建创新报门（提交你的创意，启动专利挖掘）" width="780" :ok-text="`确定 (${attachmentCount} 项资料)`"
            :ok-button-props="{ loading: submitting }"
            @ok="onOk" @cancel="onCancel" :mask-closable="false">
 

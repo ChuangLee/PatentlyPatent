@@ -26,7 +26,7 @@ async function loginAs(role: Role) {
       <p style="color:#888;margin-bottom:24px">选择角色一键登录，无需密码（演示用）。</p>
       <div style="display:flex;gap:12px;flex-direction:column">
         <a-button type="primary" size="large" block @click="loginAs('employee')">
-          👤 我是员工 — 报门 / 挖掘 / 起草交底书
+          👤 我是员工 — 报门（提交创意） / 挖掘 / 起草交底书
         </a-button>
         <a-button size="large" block @click="loginAs('admin')">
           📊 我是管理员 — 看全量分布与项目

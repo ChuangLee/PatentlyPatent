@@ -113,7 +113,7 @@ function onMenuClick({ key }: { key: string }) {
             </div>
           </a-spin>
           <a-button type="primary" block size="small" style="margin-top:8px" @click="newProject">
-            ✨ 新建报门
+            ✨ 新建报门（登记新创意）
           </a-button>
         </div>
 

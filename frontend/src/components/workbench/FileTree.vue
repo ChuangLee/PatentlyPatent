@@ -7,21 +7,32 @@ import { computed, ref, h } from 'vue';
 import {
   Tree as ATree,
   Button as AButton,
-  Switch as ASwitch,
   Modal as AModal,
   Input as AInput,
   Upload as AUpload,
   Dropdown as ADropdown,
   Menu as AMenu,
   MenuItem as AMenuItem,
+  Tooltip as ATooltip,
   message,
 } from 'ant-design-vue';
+import {
+  FolderAddOutlined,
+  UploadOutlined,
+  DeleteOutlined,
+  ReloadOutlined,
+  EyeOutlined,
+  EyeInvisibleOutlined,
+  ColumnHeightOutlined,
+  ColumnWidthOutlined,
+} from '@ant-design/icons-vue';
 import { useFilesStore } from '@/stores/files';
 import type { FileNode, FileMime } from '@/types';
 
 defineProps<{ projectId: string }>();
 
 const files = useFilesStore();
+const wrapNames = ref(false);   // 多行 / 单行
 
 // 选中节点（用于"在选中文件夹下创建/上传"）
 const selectedKeys = ref<string[]>([]);
@@ -255,6 +266,37 @@ function confirmRemove(id: string) {
   });
 }
 
+// 工具栏：删除当前选中
+function deleteSelected() {
+  const id = selectedKeys.value[0];
+  if (!id) {
+    message.info('请先点选一个文件或文件夹');
+    return;
+  }
+  const node = files.getNode(id);
+  if (!node) return;
+  // 不允许删除根目录
+  if (node.parentId === null) {
+    message.warning('不能删除根目录');
+    return;
+  }
+  confirmRemove(id);
+}
+
+// 工具栏：刷新（重置缓存重新装载）
+function refreshTree() {
+  const pid = files.projectId;
+  if (!pid) return;
+  // 清 sessionStorage，重 attach
+  sessionStorage.removeItem('pp.files.' + pid);
+  // 触发重新装载需要 initialTree——这里我们重新用现 tree 备份再 attach 等价
+  const backup = JSON.parse(JSON.stringify(files.tree));
+  files.attach(pid, backup);
+  message.success('已刷新');
+}
+
+function toggleWrap() { wrapNames.value = !wrapNames.value; }
+
 // 节点 title 渲染（slot）
 function renderNodeTitle(node: AntdTreeNode) {
   const raw = node.raw;
@@ -286,16 +328,47 @@ function renderNodeTitle(node: AntdTreeNode) {
 
 <template>
   <div style="display:flex;flex-direction:column;height:100%;overflow:hidden">
-    <!-- 工具栏 -->
-    <div style="display:flex;flex-wrap:wrap;gap:6px;padding:8px;border-bottom:1px solid #eee;align-items:center">
-      <AButton size="small" @click="openNewFolder">+ 新建文件夹</AButton>
+    <!-- 工具栏（图标 + tooltip） -->
+    <div class="pp-toolbar">
+      <ATooltip :title="`新建文件夹（在 ${currentFolderId ? files.breadcrumb(currentFolderId) : '根目录'} 下）`">
+        <AButton type="text" size="small" @click="openNewFolder">
+          <template #icon><FolderAddOutlined /></template>
+        </AButton>
+      </ATooltip>
       <AUpload :before-upload="beforeUpload" :show-upload-list="false" multiple>
-        <AButton size="small">+ 上传</AButton>
+        <ATooltip title="上传文件（多选支持，文件存当前选中文件夹内）">
+          <AButton type="text" size="small">
+            <template #icon><UploadOutlined /></template>
+          </AButton>
+        </ATooltip>
       </AUpload>
-      <span style="margin-left:auto;display:inline-flex;align-items:center;gap:4px;font-size:12px;color:#666">
-        显示隐藏
-        <ASwitch size="small" :checked="files.showHidden" @change="files.toggleHidden" />
-      </span>
+      <ATooltip title="删除当前选中">
+        <AButton type="text" size="small" :danger="!!selectedKeys[0]" @click="deleteSelected">
+          <template #icon><DeleteOutlined /></template>
+        </AButton>
+      </ATooltip>
+      <ATooltip title="刷新（从缓存重载）">
+        <AButton type="text" size="small" @click="refreshTree">
+          <template #icon><ReloadOutlined /></template>
+        </AButton>
+      </ATooltip>
+      <span style="flex:1"></span>
+      <ATooltip :title="wrapNames ? '切到单行显示' : '切到多行显示（长名换行）'">
+        <AButton type="text" size="small" @click="toggleWrap">
+          <template #icon>
+            <ColumnHeightOutlined v-if="wrapNames" />
+            <ColumnWidthOutlined v-else />
+          </template>
+        </AButton>
+      </ATooltip>
+      <ATooltip :title="files.showHidden ? '隐藏 .ai-internal 等隐藏项' : '显示 .ai-internal 等隐藏项'">
+        <AButton type="text" size="small" @click="files.toggleHidden">
+          <template #icon>
+            <EyeOutlined v-if="files.showHidden" />
+            <EyeInvisibleOutlined v-else />
+          </template>
+        </AButton>
+      </ATooltip>
     </div>
 
     <!-- 树 -->
@@ -306,6 +379,7 @@ function renderNodeTitle(node: AntdTreeNode) {
             :tree-data="treeData"
             :selected-keys="selectedKeys"
             :expanded-keys="expandedKeys"
+            :class="{ 'pp-tree-wrap': wrapNames }"
             block-node
             draggable
             @select="onSelect"
@@ -349,5 +423,23 @@ function renderNodeTitle(node: AntdTreeNode) {
 <style scoped>
 .pp-tree-node {
   user-select: none;
+}
+.pp-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 4px 6px;
+  border-bottom: 1px solid #eee;
+}
+/* 多行显示：节点 title 换行 */
+:deep(.pp-tree-wrap .ant-tree-node-content-wrapper) {
+  white-space: normal !important;
+  word-break: break-all;
+  height: auto !important;
+  min-height: 24px;
+}
+:deep(.pp-tree-wrap .pp-tree-node) {
+  white-space: normal;
+  word-break: break-all;
 }
 </style>

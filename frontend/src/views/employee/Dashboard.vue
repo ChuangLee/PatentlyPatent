@@ -50,11 +50,11 @@ function go(p: Project) {
   <a-page-header title="我的创新项目" sub-title="把工作中发现的创新点报上来，AI 帮你拆解并起草交底书" />
 
   <a-button type="primary" size="large" style="margin-bottom:24px" @click="modalOpen = true">
-    ✨ 新建报门
+    ✨ 新建报门（提交创意，启动 AI 专利挖掘）
   </a-button>
 
   <a-spin :spinning="loading">
-    <a-empty v-if="!loading && projects.length === 0" description="还没有创新项目，点击上方'新建报门'开始" />
+    <a-empty v-if="!loading && projects.length === 0" description="还没有创新项目，点击上方'新建报门（提交创意）'开始" />
     <a-row :gutter="[16, 16]" v-else>
       <a-col v-for="p in projects" :key="p.id" :xs="24" :md="12" :lg="8">
         <a-card hoverable :title="p.title" @click="go(p)">

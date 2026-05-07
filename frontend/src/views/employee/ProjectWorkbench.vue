@@ -88,7 +88,7 @@ function onRoundComplete() {
         size="small"
         style="margin-top:8px"
       >
-        <a-step title="报门" />
+        <a-step title="报门（提交创意）" />
         <a-step title="挖掘" />
         <a-step title="检索" />
         <a-step title="撰写" />
