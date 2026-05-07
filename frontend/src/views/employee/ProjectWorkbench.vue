@@ -12,7 +12,9 @@ import { useAuthStore } from '@/stores/auth';
 import AgentChatStream from '@/components/chat/AgentChatStream.vue';
 import FilePreviewer from '@/components/workbench/FilePreviewer.vue';
 import ReadonlyBanner from '@/components/common/ReadonlyBanner.vue';
-import type { Project, ProjectStatus } from '@/types';
+import { disclosureApi } from '@/api/disclosure';
+import { message } from 'ant-design-vue';
+import type { Project, ProjectStatus, FileNode } from '@/types';
 
 const route = useRoute();
 const chat = useChatStore();
@@ -21,8 +23,28 @@ const auth = useAuthStore();
 
 const project = ref<Project | null>(null);
 const round = ref(1);
+const chatRef = ref<InstanceType<typeof AgentChatStream> | null>(null);
+const generating = ref(false);
 
 const isReadonly = computed(() => auth.role === 'admin');
+
+async function generateDisclosureDocx() {
+  if (!project.value) return;
+  generating.value = true;
+  try {
+    const resp = await disclosureApi.generateDocx(project.value.id);
+    const node: FileNode = resp.file;
+    const exists = files.tree.find(n => n.id === node.id);
+    if (!exists) files.pushNode(node);
+    files.selectFile(node.id);
+    message.success('交底书已生成 → AI 输出/' + node.name);
+    if (project.value && resp.projectStatus) project.value.status = resp.projectStatus as ProjectStatus;
+  } catch (e) {
+    message.error('生成失败：' + (e as Error).message);
+  } finally {
+    generating.value = false;
+  }
+}
 
 /** status → a-steps current（0-based） */
 const STATUS_STEP: Record<ProjectStatus, number> = {
@@ -81,6 +103,16 @@ function onRoundComplete() {
     :title="project?.title ?? '加载中...'"
     sub-title="工作台 · 文件 + AI 对话 + 预览"
   >
+    <template #extra>
+      <a-button
+        v-if="!isReadonly && project"
+        type="primary"
+        :loading="generating"
+        @click="generateDisclosureDocx"
+      >
+        🎯 生成交底书 .docx
+      </a-button>
+    </template>
     <template #footer>
       <a-steps
         v-if="project"

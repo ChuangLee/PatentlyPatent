@@ -14,6 +14,7 @@ from ..schemas import ChatRequest, AutoMineRequest, FileNodeOut
 from ..llm import stream_chat, split_grapheme
 from ..llm_fill import fill_section
 from ..mining import build_sections
+from ..research import quick_landscape, landscape_to_md
 
 router = APIRouter(tags=["chat"])
 
@@ -79,6 +80,27 @@ async def auto_mining(pid: str, body: AutoMineRequest, db: Session = Depends(get
         for chunk in split_grapheme(opening, 3):
             yield {"event": "delta", "data": json.dumps({"chunk": chunk}, ensure_ascii=False)}
             await asyncio.sleep(0.025)
+
+        # ─── 第 0 步：调智慧芽看下该领域的存量（mid-fi 真接 ↗） ───
+        sniff = "\n🔎 先去智慧芽快速看看该方向已经有多少专利申请...\n"
+        for chunk in split_grapheme(sniff, 3):
+            yield {"event": "delta", "data": json.dumps({"chunk": chunk}, ensure_ascii=False)}
+            await asyncio.sleep(0.02)
+        landscape = await quick_landscape(p.description, p.title)
+        landscape_md = landscape_to_md(landscape)
+        if landscape.get("available"):
+            note = (
+                f"   ✓ 已检索：综合命中 {landscape.get('total_count', 0):,} 篇\n"
+                f"   ✓ 关键词：{', '.join(landscape.get('keywords', [])[:5])}\n"
+            )
+        else:
+            note = f"   ⚠️ 智慧芽未跑通：{landscape.get('error', '未知')}\n"
+        for chunk in split_grapheme(note, 3):
+            yield {"event": "delta", "data": json.dumps({"chunk": chunk}, ensure_ascii=False)}
+            await asyncio.sleep(0.015)
+        # 把 landscape 注入到第一节顶部
+        if sections and sections[0]["name"] == "01-背景技术.md":
+            sections[0]["content"] = landscape_md + sections[0]["content"]
 
         for sec in sections:
             intro = (

@@ -13,6 +13,7 @@ from .routes import projects as r_projects
 from .routes import files as r_files
 from .routes import chat as r_chat
 from .routes import search as r_search
+from .routes import disclosure as r_disclosure
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
 log = logging.getLogger("patentlypatent")
@@ -48,6 +49,7 @@ app.include_router(r_projects.router, prefix=settings.api_prefix)
 app.include_router(r_files.router, prefix=settings.api_prefix)
 app.include_router(r_chat.router, prefix=settings.api_prefix)
 app.include_router(r_search.router, prefix=settings.api_prefix)
+app.include_router(r_disclosure.router, prefix=settings.api_prefix)
 
 
 @app.get("/api/ping")
