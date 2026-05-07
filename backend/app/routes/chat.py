@@ -12,6 +12,7 @@ from ..db import get_db, session_scope
 from ..models import Project, FileNode
 from ..schemas import ChatRequest, AutoMineRequest, FileNodeOut
 from ..llm import stream_chat, split_grapheme
+from ..llm_fill import fill_section
 from ..mining import build_sections
 
 router = APIRouter(tags=["chat"])
@@ -90,6 +91,9 @@ async def auto_mining(pid: str, body: AutoMineRequest, db: Session = Depends(get
                 await asyncio.sleep(0.02)
             await asyncio.sleep(0.3)
 
+            # 用 LLM（或 mock）填占位
+            filled = await fill_section(sec["content"], ctx)
+
             # 把文件真持久化到数据库
             with session_scope() as db2:
                 fid = f"f-{uuid.uuid4().hex[:10]}"
@@ -98,8 +102,8 @@ async def auto_mining(pid: str, body: AutoMineRequest, db: Session = Depends(get
                     id=fid, project_id=pid, name=sec["name"], kind="file",
                     parent_id=ai_root_id, source="ai",
                     mime="text/markdown",
-                    content=sec["content"],
-                    size=len(sec["content"].encode()),
+                    content=filled,
+                    size=len(filled.encode()),
                     created_at=now, updated_at=now,
                 ))
 
@@ -107,8 +111,8 @@ async def auto_mining(pid: str, body: AutoMineRequest, db: Session = Depends(get
             node_out = {
                 "id": fid, "name": sec["name"], "kind": "file",
                 "parentId": ai_root_id, "source": "ai", "hidden": False,
-                "mime": "text/markdown", "content": sec["content"],
-                "size": len(sec["content"].encode()),
+                "mime": "text/markdown", "content": filled,
+                "size": len(filled.encode()),
                 "createdAt": now.isoformat(), "updatedAt": now.isoformat(),
             }
             yield {"event": "file", "data": json.dumps({"node": node_out}, ensure_ascii=False)}
