@@ -16,6 +16,7 @@ const submitting = ref(false);
 const form = reactive({
   title: '',
   domain: 'other' as Domain,
+  customDomain: '',
   stage: 'idea' as ProjectStage,
   goal: 'full_disclosure' as ProjectGoal,
   notes: '',
@@ -27,7 +28,7 @@ const DOMAINS: { value: Domain; label: string }[] = [
   { value: 'cryptography', label: '密码学' },
   { value: 'infosec', label: '信息安全' },
   { value: 'ai', label: '人工智能' },
-  { value: 'other', label: '其他' },
+  { value: 'other', label: '其他（自填）' },
 ];
 
 const STAGES: { value: ProjectStage; label: string; icon: string }[] = [
@@ -80,6 +81,7 @@ function fmtSize(b?: number): string {
 function reset() {
   form.title = '';
   form.domain = 'other';
+  form.customDomain = '';
   form.stage = 'idea';
   form.goal = 'full_disclosure';
   form.notes = '';
@@ -91,13 +93,22 @@ async function onOk() {
     message.warning('请填项目标题（至少 4 字）');
     return;
   }
+  if (form.domain === 'other' && form.customDomain.trim().length < 2) {
+    message.warning('选了"其他"请填写具体技术领域');
+    return;
+  }
   submitting.value = true;
   try {
-    const description = form.notes.trim() || `（员工于报门时未填补充说明）领域=${form.domain}, 阶段=${form.stage}, 期望=${form.goal}`;
+    const domainShown = form.domain === 'other'
+      ? form.customDomain.trim()
+      : (DOMAINS.find(d => d.value === form.domain)?.label ?? form.domain);
+    const description = form.notes.trim()
+      || `领域=${domainShown}, 阶段=${form.stage}, 期望=${form.goal}（员工未填补充说明）`;
     const p = await projectsApi.create({
       title: form.title.trim(),
       description,
       domain: form.domain,
+      customDomain: form.domain === 'other' ? form.customDomain.trim() : undefined,
       ownerId: auth.user!.id,
       attachments: attachments.value.length ? attachments.value : undefined,
     });
@@ -167,6 +178,11 @@ function onCancel() {
             <a-select v-model:value="form.domain">
               <a-select-option v-for="d in DOMAINS" :key="d.value" :value="d.value">{{ d.label }}</a-select-option>
             </a-select>
+            <a-input v-if="form.domain === 'other'"
+                     v-model:value="form.customDomain"
+                     style="margin-top:8px"
+                     placeholder="请输入具体领域，如：生物医药 / 机械设计 / 物联网…"
+                     :maxlength="40" show-count />
           </a-form-item>
         </a-col>
         <a-col :span="12">

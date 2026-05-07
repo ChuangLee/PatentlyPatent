@@ -63,7 +63,7 @@ function go(p: Project) {
           </template>
           <p style="color:#888;height:60px;overflow:hidden;text-overflow:ellipsis">{{ p.description }}</p>
           <p style="color:#aaa;font-size:12px;margin-top:12px">
-            {{ p.domain }} · 更新 {{ new Date(p.updatedAt).toLocaleDateString() }}
+            {{ p.customDomain || p.domain }} · 更新 {{ new Date(p.updatedAt).toLocaleDateString() }}
           </p>
         </a-card>
       </a-col>

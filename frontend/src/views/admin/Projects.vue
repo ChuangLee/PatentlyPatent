@@ -55,7 +55,9 @@ function viewProject(p: Project) {
            :custom-row="(record: Project) => ({ onClick: () => viewProject(record), style: { cursor: 'pointer' } })">
     <template #bodyCell="{ column, record }: { column: { key: string }, record: Project }">
       <template v-if="column.key === 'owner'">u1 张工程师</template>
-      <template v-else-if="column.key === 'domain'">{{ DOMAIN_META[record.domain] }}</template>
+      <template v-else-if="column.key === 'domain'">
+        {{ record.customDomain || DOMAIN_META[record.domain] }}
+      </template>
       <template v-else-if="column.key === 'status'">
         <a-tag>{{ STATUS_META[record.status] }}</a-tag>
       </template>

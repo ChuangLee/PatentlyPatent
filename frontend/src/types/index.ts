@@ -90,6 +90,7 @@ export interface Project {
   id: string;
   title: string;
   domain: Domain;
+  customDomain?: string;                // domain==='other' 时填，自由文本
   description: string;
   status: ProjectStatus;
   ownerId: string;

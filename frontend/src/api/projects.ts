@@ -10,6 +10,7 @@ export const projectsApi = {
     title: string;
     description: string;
     domain: Domain;
+    customDomain?: string;
     ownerId: string;
     attachments?: Attachment[];
   }) =>

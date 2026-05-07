@@ -20,7 +20,9 @@ export const projectsHandlers = [
 
   http.post('/api/projects', async ({ request }) => {
     const body = await request.json() as {
-      title: string; description: string; domain: Domain; ownerId: string;
+      title: string; description: string;
+      domain: Domain; customDomain?: string;
+      ownerId: string;
       attachments?: Attachment[];
     };
     const newP: Project = {
@@ -28,6 +30,7 @@ export const projectsHandlers = [
       title: body.title,
       description: body.description,
       domain: body.domain,
+      customDomain: body.customDomain,
       ownerId: body.ownerId,
       status: 'drafting',
       createdAt: new Date().toISOString(),
