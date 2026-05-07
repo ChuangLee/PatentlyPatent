@@ -1,0 +1,44 @@
+{
+  "name": "patentlypatent-prototype",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vue-tsc -b && vite build",
+    "preview": "vite preview --base /patent/",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "lint": "eslint . --ext .vue,.ts,.tsx --max-warnings 0",
+    "deploy": "pnpm run build && bash scripts/deploy.sh"
+  },
+  "dependencies": {
+    "vue": "^3.5.13",
+    "vue-router": "^4.4.5",
+    "pinia": "^2.3.0",
+    "ant-design-vue": "^4.2.6",
+    "@ant-design/icons-vue": "^7.0.1",
+    "axios": "^1.7.9",
+    "echarts": "^5.5.1",
+    "@tiptap/vue-3": "^2.10.4",
+    "@tiptap/starter-kit": "^2.10.4",
+    "dayjs": "^1.11.13"
+  },
+  "pnpm": {
+    "overrides": {
+      "vite": "^6.0.7"
+    }
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.2",
+    "@vitejs/plugin-vue": "^5.2.1",
+    "@vue/test-utils": "^2.4.6",
+    "@vue/tsconfig": "^0.7.0",
+    "happy-dom": "^15.11.7",
+    "msw": "^2.7.0",
+    "typescript": "^5.7.2",
+    "vite": "^6.0.7",
+    "vitest": "^2.1.8",
+    "vue-tsc": "^2.2.0"
+  }
+}
