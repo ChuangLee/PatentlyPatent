@@ -1,10 +1,19 @@
-"""对话 SSE：chat（用户对话）+ auto-mining（自动挖掘）"""
+"""对话 SSE：chat（用户对话）+ auto-mining（自动挖掘）
+
+v0.9-A 新增：
+- chat 流式回答收尾时，调 answer_router.route_answer 识别用户问题归属的章节，
+  把回答自动追加到 'AI 输出/' 下对应的 md 文件，并通过 SSE file 事件推给前端。
+- 新增 POST /projects/:id/chat/append-to-file 显式追加端点，供前端手动触发。
+"""
 from __future__ import annotations
 import asyncio
 import json
 import uuid
 from datetime import datetime, timezone
+from typing import Optional
+
 from fastapi import APIRouter, Depends, HTTPException
+from pydantic import BaseModel
 from sse_starlette.sse import EventSourceResponse
 from sqlalchemy.orm import Session
 
@@ -15,8 +24,100 @@ from ..llm import stream_chat, split_grapheme
 from ..llm_fill import fill_section
 from ..mining import build_sections
 from ..research import quick_landscape, landscape_to_md
+from ..answer_router import route_answer
 
 router = APIRouter(tags=["chat"])
+
+
+# ─── 工具：把内容追加到指定 md 文件 ───────────────────────────────────────
+
+
+def _format_user_supplement(user_msg: str, ai_summary: str, ts: datetime) -> str:
+    """生成「💬 用户补充」block。"""
+    ts_str = ts.strftime("%Y-%m-%d %H:%M")
+    # 把 ai_summary 中的换行加上 markdown blockquote 前缀，避免破坏 quote 结构
+    summary_lines = ai_summary.strip().splitlines() or [""]
+    quoted = "\n".join(f"> {line}" if line else ">" for line in summary_lines)
+    user_lines = user_msg.strip().splitlines() or [""]
+    user_quoted = "\n".join(f"> {line}" if line else ">" for line in user_lines)
+    return (
+        f"\n\n> 💬 **用户补充**（{ts_str}）：\n"
+        f"{user_quoted}\n"
+        f">\n"
+        f"{quoted}\n"
+    )
+
+
+def _append_to_section(content: str, anchor: Optional[str], block: str) -> str:
+    """把 block 拼到 content 的末尾或指定 H2 anchor 之后（下一个 H2 之前）。"""
+    if not anchor or anchor not in content:
+        # anchor 没给或没找到：直接拼到末尾
+        if not content.endswith("\n"):
+            content += "\n"
+        return content + block
+
+    # 找到 anchor 行
+    idx = content.find(anchor)
+    # anchor 这行的结尾
+    line_end = content.find("\n", idx)
+    if line_end == -1:
+        # anchor 是最后一行
+        return content + block
+
+    # 找下一个 H2（## ）的位置；如没有，则末尾
+    rest = content[line_end:]
+    # 用换行 + "## " 定位下一个 H2，避免误命中行内 ##
+    next_h2_rel = rest.find("\n## ")
+    if next_h2_rel == -1:
+        # anchor 之后没有更多 H2 —— 拼到文末
+        return content.rstrip("\n") + block + "\n"
+
+    insert_pos = line_end + next_h2_rel
+    return content[:insert_pos] + block + content[insert_pos:]
+
+
+def _find_ai_md_file(db: Session, pid: str, file_name: str) -> Optional[FileNode]:
+    """在该项目 'AI 输出/' 文件夹下找指定 md 文件。"""
+    # 找 ai 根目录
+    ai_root = db.query(FileNode).filter(
+        FileNode.project_id == pid,
+        FileNode.parent_id.is_(None),
+        FileNode.source == "ai",
+    ).first()
+    if not ai_root:
+        return None
+    return db.query(FileNode).filter(
+        FileNode.project_id == pid,
+        FileNode.parent_id == ai_root.id,
+        FileNode.name == file_name,
+        FileNode.kind == "file",
+    ).first()
+
+
+def _do_append(
+    db: Session,
+    pid: str,
+    file_name: str,
+    anchor: Optional[str],
+    user_msg: str,
+    ai_summary: str,
+) -> Optional[FileNode]:
+    """实际写库，返回更新后的 FileNode（None 表示文件不存在）。"""
+    f = _find_ai_md_file(db, pid, file_name)
+    if not f:
+        return None
+    now = datetime.now(timezone.utc)
+    block = _format_user_supplement(user_msg, ai_summary, now)
+    new_content = _append_to_section(f.content or "", anchor, block)
+    f.content = new_content
+    f.size = len(new_content.encode())
+    f.updated_at = now
+    db.commit()
+    db.refresh(f)
+    return f
+
+
+# ─── 路由 ────────────────────────────────────────────────────────────────
 
 
 @router.post("/projects/{pid}/chat")
@@ -31,15 +132,77 @@ async def chat_stream(pid: str, body: ChatRequest, db: Session = Depends(get_db)
         f"用户报门描述：{p.description}\n\n"
         "请用专业、简洁的中文回答。"
     )
+    user_msg = body.userMsg or ""
 
     async def gen():
         yield {"event": "thinking", "data": "{}"}
         await asyncio.sleep(0.3)
-        async for piece in stream_chat(body.userMsg, system=sys_prompt):
+
+        # 收集 LLM 完整回答用于追加（前端仍按 chunk 流式渲染）
+        full_answer_chunks: list[str] = []
+        async for piece in stream_chat(user_msg, system=sys_prompt):
+            full_answer_chunks.append(piece)
             yield {"event": "delta", "data": json.dumps({"chunk": piece}, ensure_ascii=False)}
+
+        full_answer = "".join(full_answer_chunks).strip()
+
+        # ── 章节路由 + 写回 ─────────────────────────────────────
+        target = route_answer(user_msg)
+        if target and full_answer:
+            try:
+                with session_scope() as db2:
+                    updated = _do_append(
+                        db2, pid,
+                        file_name=target["file"],
+                        anchor=target.get("anchor"),
+                        user_msg=user_msg,
+                        ai_summary=full_answer,
+                    )
+                    if updated is not None:
+                        node_out = FileNodeOut.model_validate(updated).model_dump(by_alias=True)
+                        # 通知前端：已经把回答归档进文件
+                        notice = f"\n\n📎 已把这条回答归档到 AI 输出/{target['file']}。\n"
+                        for chunk in split_grapheme(notice, 3):
+                            yield {"event": "delta", "data": json.dumps({"chunk": chunk}, ensure_ascii=False)}
+                        yield {"event": "file", "data": json.dumps({"node": node_out, "category": target.get("category")}, ensure_ascii=False)}
+            except Exception as e:
+                err_note = f"\n\n⚠️ 归档失败：{type(e).__name__}: {e}\n"
+                for chunk in split_grapheme(err_note, 3):
+                    yield {"event": "delta", "data": json.dumps({"chunk": chunk}, ensure_ascii=False)}
+
         yield {"event": "done", "data": "{}"}
 
     return EventSourceResponse(gen())
+
+
+# ─── 显式追加端点 ────────────────────────────────────────────────────────
+
+
+class AppendToFileBody(BaseModel):
+    fileName: str
+    sectionAnchor: Optional[str] = None
+    content: str
+    userMsg: str
+
+
+@router.post("/projects/{pid}/chat/append-to-file", response_model=dict)
+def append_to_file(pid: str, body: AppendToFileBody, db: Session = Depends(get_db)):
+    p = db.get(Project, pid)
+    if not p:
+        raise HTTPException(404, "project not found")
+    updated = _do_append(
+        db, pid,
+        file_name=body.fileName,
+        anchor=body.sectionAnchor,
+        user_msg=body.userMsg,
+        ai_summary=body.content,
+    )
+    if updated is None:
+        raise HTTPException(404, f"file not found in AI 输出/: {body.fileName}")
+    return FileNodeOut.model_validate(updated).model_dump(by_alias=True)
+
+
+# ─── auto-mining（保持原状）─────────────────────────────────────────────
 
 
 @router.post("/projects/{pid}/auto-mining")

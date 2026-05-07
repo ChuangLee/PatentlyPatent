@@ -49,3 +49,25 @@ title: PatentlyPatent 迭代日志
 - 文件预览器对 .docx 内嵌预览（mammoth.js）
 - 前端流式收到 file 事件后能自动选中显示
 
+
+## v0.9 · 2026-05-07 23:30 · 用户答写回 + .docx 内嵌预览 + 流式 file 自动选中
+
+**调研**
+- 现状：智慧芽 GET 端点已修；3 个待办 (v0.7-D / .docx 预览 / file 自动选中) 互相独立 → 三件并行
+
+**实现**（2 subagent + 主流程并行）
+- A. backend/app/answer_router.py + chat.py：route_answer 5 类关键词分发（experiment/alternatives/materials/claims/prior_art）；chat 流式 LLM 回答完毕后，把用户答案写到对应 md（按 H2 锚点定位）；流尾发 file 事件给前端实时刷新文件树
+- B. frontend mammoth 装入 + FilePreviewer.vue：检测 docx mime 时 axios arraybuffer + dynamic import('mammoth') 转 HTML 内嵌预览；含 loading/错误兜底 + .preview-docx typography 样式
+- C. AgentChatStream.vue：收到 file 事件后 files.selectFile(node.id) 让右栏自动切到新文件；已存在节点 Object.assign 更新（用户答写回时 size/content 改了）
+
+**测试**
+- pnpm test 35/35 / build 通过 / vue-tsc 严格模式无错
+- 公网 chat e2e：发"实验：H100 吞吐 18.4 req/s..."→ SSE 含 1×thinking + 66×delta + 1×file + 1×done，_问题清单.md 第八节锚点位置正确插入
+- 新增 backend 显式端点 POST /chat/append-to-file 也已端到端验证
+
+**下轮目标 (v0.10)**
+- 文件树支持多文件批量选择 + 批量删
+- 后端写回的 md 可让用户在右栏 Tiptap 直接编辑改写
+- 流式过程把已答内容显示在右栏 split view（文件预览 + 章节高亮）
+- 智慧芽 query 命中数（TACD:"xxx" count=0 问题）改用 ALL: 字段实测
+

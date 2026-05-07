@@ -32,8 +32,15 @@ async function send() {
       chat.applyFields(e.captured);
       emit('roundComplete', e.captured);
     } else if (e.type === 'file') {
-      // AI 在文件树上 spawn 文件
-      files.pushNode(e.node);
+      // AI 在文件树上 spawn / 更新文件 → 同时自动选中让右栏预览
+      const existing = files.tree.find(n => n.id === e.node.id);
+      if (existing) {
+        // 已存在节点更新（用户答写回时 fileNode.content 改了）
+        Object.assign(existing, e.node);
+      } else {
+        files.pushNode(e.node);
+      }
+      files.selectFile(e.node.id);
     } else if (e.type === 'done') {
       chat.endAgent();
     }
@@ -46,7 +53,12 @@ async function autoMine(ctx: Parameters<typeof chatApi.autoMine>[1]) {
   chat.startAgent();
   await chatApi.autoMine(props.projectId, ctx, e => {
     if (e.type === 'delta') chat.appendDelta(e.chunk);
-    else if (e.type === 'file') files.pushNode(e.node);
+    else if (e.type === 'file') {
+      const existing = files.tree.find(n => n.id === e.node.id);
+      if (existing) Object.assign(existing, e.node);
+      else files.pushNode(e.node);
+      files.selectFile(e.node.id);     // 流式生成时实时切到新文件
+    }
     else if (e.type === 'done') chat.endAgent();
   });
 }
