@@ -1,0 +1,48 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "patentlypatent"
+version = "0.1.0"
+description = "Enterprise self-service patent mining & disclosure drafting (employee + agent collaboration)"
+readme = "README.md"
+requires-python = ">=3.10"
+authors = [{ name = "ChuangLee" }]
+license = { text = "Apache-2.0" }
+keywords = ["patent", "ip", "disclosure", "prior-art", "cnipa", "llm", "agent"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: Apache Software License",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Office/Business",
+]
+dependencies = [
+    "anthropic>=0.40.0",
+    "httpx>=0.27.0",
+    "beautifulsoup4>=4.12.0",
+    "lxml>=5.0.0",
+    "click>=8.1.0",
+    "rich>=13.7.0",
+    "pydantic>=2.6.0",
+    "tomli>=2.0.0; python_version<'3.11'",
+    "tenacity>=8.2.0",
+    "platformdirs>=4.2.0",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8.0.0", "ruff>=0.4.0"]
+
+[project.urls]
+Homepage = "https://github.com/ChuangLee/PatentlyPatent"
+Repository = "https://github.com/ChuangLee/PatentlyPatent"
+Issues = "https://github.com/ChuangLee/PatentlyPatent/issues"
+
+[project.scripts]
+pk = "pk.cli:main"
+
+[tool.setuptools.packages.find]
+include = ["pk*"]

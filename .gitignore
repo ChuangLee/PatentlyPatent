@@ -1,0 +1,48 @@
+# === Secrets ===
+.secrets/
+*.env
+*.token
+*.key
+*.pem
+
+# === Reference materials (separate distribution) ===
+refs/
+*.pdf
+
+# === Python ===
+__pycache__/
+*.py[cod]
+*$py.class
+.venv/
+venv/
+.python-version
+*.egg-info/
+build/
+dist/
+
+# === Tests / coverage ===
+.pytest_cache/
+.coverage
+htmlcov/
+coverage.xml
+
+# === Editor ===
+.idea/
+.vscode/
+*.swp
+.DS_Store
+
+# === Project-specific ===
+/tmp_*/
+/scratch/
+/temp/
+
+# === Output artifacts (offline mode demo) ===
+search_result.json
+draft.md
+check_report.md
+mining.json
+oa_response.md
+
+# Third-party templates (unverified copyright)
+templates/
