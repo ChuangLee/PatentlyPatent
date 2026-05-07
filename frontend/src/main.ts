@@ -5,7 +5,17 @@ import 'ant-design-vue/dist/reset.css';
 import './styles/tokens.css';
 import App from './App.vue';
 
+async function enableMocking() {
+  if (import.meta.env.MODE === 'test') return;
+  const { worker } = await import('./mock/browser');
+  await worker.start({
+    serviceWorker: { url: '/patent/mockServiceWorker.js' },
+    onUnhandledRequest: 'bypass',
+  });
+}
+
 async function bootstrap() {
+  await enableMocking();
   const app = createApp(App);
   app.use(createPinia());
   app.use(Antd);

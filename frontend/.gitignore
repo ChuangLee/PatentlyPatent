@@ -4,3 +4,10 @@ dist
 .vite
 .env.local
 .DS_Store
+
+# tsc -b composite refs 生成物
+*.tsbuildinfo
+vite.config.d.ts
+vite.config.js
+vitest.config.d.ts
+vitest.config.js
