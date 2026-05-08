@@ -173,3 +173,85 @@ curl -sf https://blind.pub/patent/api/admin/agent_runs?limit=1 | jq .
 - agent SDK 默认 max_turns：8
 
 > TODO：`/api/admin/budget_status` 与 `PP_DAILY_BUDGET_BLOCK` env 守卫在 v0.21 计划中（iteration_log v0.20 末尾下轮目标），代码 grep 无匹配，部署前需确认是否上线，否则 §8 §9 相关条目为占位。
+
+---
+
+## CAS 对接 (v0.23)
+
+PatentlyPatent 支持 CAS protocol 2.0/3.0 单点登录，与 fake JWT 共存——前端 Login 页同时显示「员工/管理员一键登录」与「🏢 企业 CAS 登录」按钮（CAS 按钮仅在后端 `cas_enabled=true` 时出现）。
+
+### 1. 环境变量（4 个）
+
+| 变量 | 作用 | 示例值 |
+|---|---|---|
+| `PP_CAS_ENABLED` | 总开关，`1`/`true` 启用 | `1` |
+| `PP_CAS_SERVER` | CAS server 根（不带 `/login`） | `https://cas.your-corp.com/cas` |
+| `PP_CAS_SERVICE` | 后端 callback 完整 URL（CAS server 必须 whitelist 这个 service URL） | `https://blind.pub/patent/api/auth/cas/callback` |
+| `PP_CAS_FRONT_REDIRECT` | 前端登录页完整 URL；后端拿到 token 后 302 这里 | `https://blind.pub/patent/login` |
+
+写到 `.secrets/cas.env` 或 systemd unit 的 `Environment=` 里。改完 `systemctl restart patentlypatent-backend`。
+
+### 2. 流程图
+
+```mermaid
+sequenceDiagram
+    participant U as 浏览器
+    participant FE as Vue Login.vue
+    participant API as FastAPI
+    participant CAS as CAS Server
+    U->>FE: 点 "🏢 企业 CAS 登录"
+    FE->>API: GET /api/auth/cas/login
+    API-->>U: 302 → CAS_SERVER/login?service=...
+    U->>CAS: 登录表单
+    CAS-->>U: 302 → /api/auth/cas/callback?ticket=ST-xxx
+    U->>API: GET /api/auth/cas/callback?ticket=ST-xxx
+    API->>CAS: GET /p3/serviceValidate?service=...&ticket=ST-xxx
+    CAS-->>API: XML <cas:user>...</cas:user>
+    API->>API: 查/建 User → 发 JWT
+    API-->>U: 302 → FRONT_REDIRECT?token=&user=
+    U->>FE: 解 query → store.consumeCasCallback() → 跳 dashboard
+```
+
+### 3. CAS 返回 XML 字段
+
+后端用 `defusedxml` 解析以下字段（namespace `http://www.yale.edu/tp/cas`）：
+
+- `cas:authenticationSuccess/cas:user` —— 必须；作为 `User.id`
+- `cas:authenticationSuccess/cas:attributes/cas:displayName`（可选）—— 取作 `User.name`
+- `cas:authenticationSuccess/cas:attributes/cas:department`（可选）—— 取作 `User.department`
+- `cas:authenticationFailure` 出现 → 视为 ticket 无效
+
+DB 中查不到该 username 时**自动创建** `role='employee'`、`department=attrs.department or 'CAS 接入'`。
+
+### 4. ticket 时间窗
+
+CAS Service Ticket 默认 5 分钟内有效且**只能消费一次**。后端 callback 必须在 5min 内调 `serviceValidate`，否则会拿到 `INVALID_TICKET`，前端跳 `?cas_error=invalid_ticket`。
+
+### 5. 测试 CAS server
+
+- 公开 demo：`https://casdoor.org`（Casdoor 内置 CAS server，需先在控制台建一个 application 并把 `service` 加到白名单），或公司内部 CAS。
+- 不建议依赖公开 demo 做 prod；prod 必须走企业自有 CAS。
+- 没有真 CAS 时本地用 `backend/tests/test_auth_cas.py` 跑 6 个单测（用 `httpx.MockTransport` 模拟 CAS XML）：
+
+```bash
+cd backend
+PP_MOCK_LLM=1 PP_CAS_ENABLED=1 .venv/bin/pytest tests/test_auth_cas.py -v
+```
+
+### 6. 后端 endpoint
+
+| 方法 | URL | 作用 |
+|---|---|---|
+| GET | `/api/auth/cas/login` | 302 跳 CAS server |
+| GET | `/api/auth/cas/callback?ticket=...` | CAS 回调 → 验票 → 发 JWT → 跳前端 |
+| GET | `/api/auth/cas/logout` | 跳 CAS server `/logout`（前端跳前应自行清 localStorage token） |
+
+### 7. 故障排查
+
+| 症状 | 检查 |
+|---|---|
+| 点按钮无反应 | 控制台看 `apiClient` 路径；确认 `cas_enabled=true`（curl `/api/ping`） |
+| 跳到 CAS 后白屏 | CAS server 是否 whitelist `PP_CAS_SERVICE` |
+| 回前端时 `?cas_error=invalid_ticket` | ticket 已被消费/过期；让用户重新发起 |
+| 回前端时 `?cas_error=server_unreachable` | 后端日志 grep `cas validate request failed`；网络/DNS/CA 证书问题 |
+| 回前端时 token 拿到但 401 | JWT secret 改过；DB 中无 user 但 auto-create 失败（看 backend log） |

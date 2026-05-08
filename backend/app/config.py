@@ -64,6 +64,16 @@ class Settings(BaseModel):
     jwt_secret: str = os.environ.get("PP_JWT_SECRET", "dev-secret-change-in-prod")
     jwt_expire_hours: int = int(os.environ.get("PP_JWT_EXPIRE_HOURS", "24"))
 
+    # v0.23：CAS protocol 2.0/3.0 SSO（与 JWT 共存）
+    cas_enabled: bool = os.environ.get("PP_CAS_ENABLED", "").lower() in ("1", "true", "yes")
+    cas_server_url: str = os.environ.get("PP_CAS_SERVER", "https://casdoor.org/cas/example/app-cas")
+    cas_service_url: str = os.environ.get(
+        "PP_CAS_SERVICE", "https://blind.pub/patent/api/auth/cas/callback",
+    )
+    cas_frontend_redirect: str = os.environ.get(
+        "PP_CAS_FRONT_REDIRECT", "https://blind.pub/patent/login",
+    )
+
     # 智慧芽
     zhihuiya_token: str = os.environ.get("ZHIHUIYA_TOKEN", "")
     zhihuiya_api_base: str = os.environ.get(

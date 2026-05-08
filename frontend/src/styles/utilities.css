@@ -1,0 +1,131 @@
+/**
+ * PatentlyPatent 复用 utility 类
+ * 命名前缀 .pp-，避免与 antd / 第三方库冲突
+ */
+
+/* ---------- 卡片 ---------- */
+.pp-card {
+  background-color: var(--pp-color-surface);
+  border: 1px solid var(--pp-color-border-soft);
+  border-radius: var(--pp-radius-lg);
+  box-shadow: var(--pp-shadow-md);
+  padding: var(--pp-space-5);
+}
+
+.pp-card-flat {
+  background-color: var(--pp-color-surface);
+  border: 1px solid var(--pp-color-border-soft);
+  border-radius: var(--pp-radius-lg);
+  padding: var(--pp-space-5);
+}
+
+.pp-card-hover {
+  transition: transform var(--pp-transition), box-shadow var(--pp-transition);
+}
+.pp-card-hover:hover {
+  transform: translateY(-2px);
+  box-shadow: var(--pp-shadow-lg);
+}
+
+/* ---------- 数字统计 ---------- */
+.pp-stat {
+  display: flex;
+  flex-direction: column;
+  gap: var(--pp-space-1);
+}
+.pp-stat__value {
+  font-size: var(--pp-font-size-3xl);
+  font-weight: var(--pp-font-weight-semibold);
+  color: var(--pp-color-text);
+  line-height: var(--pp-line-height-tight);
+  letter-spacing: -0.02em;
+}
+.pp-stat__label {
+  font-size: var(--pp-font-size-sm);
+  color: var(--pp-color-text-secondary);
+  font-weight: var(--pp-font-weight-medium);
+}
+.pp-stat__delta {
+  font-size: var(--pp-font-size-xs);
+  font-weight: var(--pp-font-weight-medium);
+}
+.pp-stat__delta--up { color: var(--pp-color-success); }
+.pp-stat__delta--down { color: var(--pp-color-danger); }
+
+/* ---------- 玻璃拟态 (侧边栏 / 浮层) ---------- */
+.pp-glass {
+  background-color: rgba(255, 255, 255, 0.72);
+  backdrop-filter: saturate(180%) blur(16px);
+  -webkit-backdrop-filter: saturate(180%) blur(16px);
+  border: 1px solid rgba(255, 255, 255, 0.6);
+}
+
+/* ---------- 渐变背景 ---------- */
+.pp-gradient-bg {
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  color: var(--pp-color-text-inverse);
+}
+.pp-gradient-primary {
+  background: linear-gradient(135deg, #5B6CFF 0%, #8B5BFF 100%);
+  color: var(--pp-color-text-inverse);
+}
+.pp-gradient-mesh {
+  background:
+    radial-gradient(at 20% 20%, rgba(91, 108, 255, 0.18) 0%, transparent 50%),
+    radial-gradient(at 80% 0%, rgba(139, 91, 255, 0.14) 0%, transparent 50%),
+    radial-gradient(at 70% 90%, rgba(91, 207, 255, 0.10) 0%, transparent 50%),
+    var(--pp-color-bg);
+}
+
+/* ---------- 文本工具 ---------- */
+.pp-text-muted { color: var(--pp-color-text-secondary); }
+.pp-text-tertiary { color: var(--pp-color-text-tertiary); }
+.pp-text-primary { color: var(--pp-color-primary); }
+.pp-text-truncate {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.pp-text-clamp-2 {
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+/* ---------- Tag / Badge (轻量版) ---------- */
+.pp-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--pp-space-1);
+  padding: 2px var(--pp-space-2);
+  border-radius: var(--pp-radius-sm);
+  font-size: var(--pp-font-size-xs);
+  font-weight: var(--pp-font-weight-medium);
+  background-color: var(--pp-color-primary-soft);
+  color: var(--pp-color-primary-active);
+  line-height: 1.5;
+}
+.pp-tag--success { background-color: var(--pp-color-success-soft); color: var(--pp-color-success); }
+.pp-tag--warning { background-color: var(--pp-color-warning-soft); color: var(--pp-color-warning); }
+.pp-tag--danger { background-color: var(--pp-color-danger-soft); color: var(--pp-color-danger); }
+.pp-tag--info { background-color: var(--pp-color-info-soft); color: var(--pp-color-info); }
+.pp-tag--neutral { background-color: var(--pp-color-bg-elevated); color: var(--pp-color-text-secondary); }
+
+/* ---------- 分割线 ---------- */
+.pp-divider {
+  height: 1px;
+  background-color: var(--pp-color-border-soft);
+  border: none;
+  margin: var(--pp-space-4) 0;
+}
+
+/* ---------- 按钮重置 (无 antd 时备用) ---------- */
+.pp-btn-reset {
+  background: none;
+  border: none;
+  padding: 0;
+  cursor: pointer;
+  color: inherit;
+  font: inherit;
+}

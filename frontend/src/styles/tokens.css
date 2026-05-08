@@ -1,11 +1,109 @@
+/**
+ * PatentlyPatent Design Tokens
+ * 现代企业 SaaS 风格 (Linear / Notion / Vercel inspired)
+ * 所有 token 以 --pp- 前缀，通过 CSS 变量暴露，便于运行时主题切换。
+ */
 :root {
-  --pp-bg: #f5f5f5;
-  --pp-fg: #1f2937;
-  --pp-muted: #6b7280;
-  --pp-accent: #1677ff;
-  --pp-success: #16a34a;
-  --pp-warn: #d97706;
-  --pp-danger: #dc2626;
+  /* ---------- 品牌色 (Indigo / 紫蓝) ---------- */
+  --pp-color-primary: #5B6CFF;
+  --pp-color-primary-hover: #4A5BFF;
+  --pp-color-primary-active: #3A4BEF;
+  --pp-color-primary-soft: #EEF0FF;
+  --pp-color-primary-soft-hover: #E0E4FF;
+
+  /* ---------- 语义色 ---------- */
+  --pp-color-success: #10B981;
+  --pp-color-success-soft: #ECFDF5;
+  --pp-color-warning: #F59E0B;
+  --pp-color-warning-soft: #FFFBEB;
+  --pp-color-danger: #EF4444;
+  --pp-color-danger-soft: #FEF2F2;
+  --pp-color-info: #3B82F6;
+  --pp-color-info-soft: #EFF6FF;
+
+  /* ---------- 中性色 ---------- */
+  --pp-color-bg: #FAFBFC;
+  --pp-color-bg-elevated: #F4F5F7;
+  --pp-color-surface: #FFFFFF;
+  --pp-color-surface-hover: #F9FAFB;
+  --pp-color-border: #E5E7EB;
+  --pp-color-border-soft: #F3F4F6;
+  --pp-color-border-strong: #D1D5DB;
+  --pp-color-text: #111827;
+  --pp-color-text-secondary: #6B7280;
+  --pp-color-text-tertiary: #9CA3AF;
+  --pp-color-text-disabled: #D1D5DB;
+  --pp-color-text-inverse: #FFFFFF;
+
+  /* ---------- 间距 (8px 网格) ---------- */
+  --pp-space-0: 0;
+  --pp-space-1: 4px;
+  --pp-space-2: 8px;
+  --pp-space-3: 12px;
+  --pp-space-4: 16px;
+  --pp-space-5: 24px;
+  --pp-space-6: 32px;
+  --pp-space-7: 48px;
+  --pp-space-8: 64px;
+
+  /* ---------- 圆角 ---------- */
+  --pp-radius-sm: 6px;
+  --pp-radius-md: 10px;
+  --pp-radius-lg: 14px;
+  --pp-radius-xl: 20px;
+  --pp-radius-full: 9999px;
+
+  /* ---------- 阴影 (柔和层叠) ---------- */
+  --pp-shadow-sm: 0 1px 2px rgba(17, 24, 39, 0.04), 0 1px 1px rgba(17, 24, 39, 0.02);
+  --pp-shadow-md: 0 4px 6px -1px rgba(17, 24, 39, 0.06), 0 2px 4px -2px rgba(17, 24, 39, 0.04);
+  --pp-shadow-lg: 0 10px 15px -3px rgba(17, 24, 39, 0.08), 0 4px 6px -4px rgba(17, 24, 39, 0.04);
+  --pp-shadow-xl: 0 20px 25px -5px rgba(17, 24, 39, 0.10), 0 8px 10px -6px rgba(17, 24, 39, 0.04);
+  --pp-shadow-2xl: 0 25px 50px -12px rgba(17, 24, 39, 0.18);
+  --pp-shadow-inset: inset 0 1px 2px rgba(17, 24, 39, 0.04);
+  --pp-shadow-focus: 0 0 0 3px rgba(91, 108, 255, 0.18);
+
+  /* ---------- 字体 ---------- */
+  --pp-font-sans: 'Inter', 'PingFang SC', 'Noto Sans SC', -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Microsoft YaHei', sans-serif;
+  --pp-font-mono: 'JetBrains Mono', 'SF Mono', Menlo, Consolas, 'Liberation Mono', monospace;
+
+  --pp-font-size-xs: 12px;
+  --pp-font-size-sm: 13px;
+  --pp-font-size-base: 14px;
+  --pp-font-size-lg: 16px;
+  --pp-font-size-xl: 18px;
+  --pp-font-size-2xl: 22px;
+  --pp-font-size-3xl: 28px;
+  --pp-font-size-4xl: 36px;
+
+  --pp-font-weight-regular: 400;
+  --pp-font-weight-medium: 500;
+  --pp-font-weight-semibold: 600;
+  --pp-font-weight-bold: 700;
+
+  --pp-line-height-tight: 1.25;
+  --pp-line-height-normal: 1.5;
+  --pp-line-height-relaxed: 1.7;
+
+  /* ---------- 过渡 ---------- */
+  --pp-transition-fast: 120ms ease;
+  --pp-transition: 200ms cubic-bezier(0.4, 0, 0.2, 1);
+  --pp-transition-slow: 320ms cubic-bezier(0.4, 0, 0.2, 1);
+
+  /* ---------- z-index 层级 ---------- */
+  --pp-z-dropdown: 1000;
+  --pp-z-sticky: 1020;
+  --pp-z-fixed: 1030;
+  --pp-z-modal-backdrop: 1040;
+  --pp-z-modal: 1050;
+  --pp-z-popover: 1060;
+  --pp-z-tooltip: 1070;
+
+  /* ---------- 兼容旧 token (legacy alias) ---------- */
+  --pp-bg: var(--pp-color-bg);
+  --pp-fg: var(--pp-color-text);
+  --pp-muted: var(--pp-color-text-secondary);
+  --pp-accent: var(--pp-color-primary);
+  --pp-success: var(--pp-color-success);
+  --pp-warn: var(--pp-color-warning);
+  --pp-danger: var(--pp-color-danger);
 }
-html, body, #app { margin: 0; height: 100%; }
-body { font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Microsoft YaHei", sans-serif; }

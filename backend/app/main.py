@@ -9,6 +9,7 @@ from .config import settings
 from .db import init_db, session_scope
 from .fixtures import seed_users
 from .routes import auth as r_auth
+from .routes import auth_cas as r_auth_cas
 from .routes import projects as r_projects
 from .routes import files as r_files
 from .routes import chat as r_chat
@@ -50,6 +51,7 @@ app.add_middleware(
 
 # 单一 prefix 挂所有路由
 app.include_router(r_auth.router, prefix=settings.api_prefix)
+app.include_router(r_auth_cas.router, prefix=settings.api_prefix)
 app.include_router(r_projects.router, prefix=settings.api_prefix)
 app.include_router(r_files.router, prefix=settings.api_prefix)
 app.include_router(r_chat.router, prefix=settings.api_prefix)
@@ -68,4 +70,5 @@ def ping():
         "version": "0.5.0",
         "use_real_llm": settings.use_real_llm,
         "use_real_zhihuiya": settings.use_real_zhihuiya,
+        "cas_enabled": settings.cas_enabled,
     }

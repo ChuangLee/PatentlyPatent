@@ -4,6 +4,8 @@ import { createPinia } from 'pinia';
 // 仍保留 reset.css 全局样式
 import 'ant-design-vue/dist/reset.css';
 import './styles/tokens.css';
+import './styles/global.css';
+import './styles/utilities.css';
 import App from './App.vue';
 import { createAppRouter } from './router';
 

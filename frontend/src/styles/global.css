@@ -1,0 +1,107 @@
+/**
+ * PatentlyPatent 全局样式
+ * - body / 滚动条 / 选区 / 链接 / 焦点环
+ * - 仅放最小必要的全局 reset，组件内部样式不在此处覆盖
+ */
+
+html, body, #app {
+  margin: 0;
+  padding: 0;
+  height: 100%;
+  width: 100%;
+}
+
+body {
+  background-color: var(--pp-color-bg);
+  color: var(--pp-color-text);
+  font-family: var(--pp-font-sans);
+  font-size: var(--pp-font-size-base);
+  line-height: var(--pp-line-height-normal);
+  font-feature-settings: 'cv02', 'cv03', 'cv04', 'cv11';
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+/* ---------- 选中色 ---------- */
+::selection {
+  background-color: var(--pp-color-primary-soft);
+  color: var(--pp-color-primary-active);
+}
+
+/* ---------- 链接 ---------- */
+a {
+  color: var(--pp-color-primary);
+  text-decoration: none;
+  transition: color var(--pp-transition-fast);
+}
+a:hover {
+  color: var(--pp-color-primary-hover);
+  text-decoration: none;
+}
+
+/* ---------- 滚动条 (webkit) ---------- */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background-color: rgba(17, 24, 39, 0.15);
+  border-radius: var(--pp-radius-full);
+  border: 2px solid transparent;
+  background-clip: padding-box;
+  transition: background-color var(--pp-transition-fast);
+}
+::-webkit-scrollbar-thumb:hover {
+  background-color: rgba(17, 24, 39, 0.30);
+  background-clip: padding-box;
+}
+::-webkit-scrollbar-corner {
+  background: transparent;
+}
+
+/* Firefox 滚动条 */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(17, 24, 39, 0.18) transparent;
+}
+
+/* ---------- 焦点环 (键盘可访问) ---------- */
+:focus-visible {
+  outline: none;
+  box-shadow: var(--pp-shadow-focus);
+  border-radius: var(--pp-radius-sm);
+}
+
+/* ---------- 标题默认 reset ---------- */
+h1, h2, h3, h4, h5, h6 {
+  margin: 0;
+  font-weight: var(--pp-font-weight-semibold);
+  color: var(--pp-color-text);
+  line-height: var(--pp-line-height-tight);
+}
+
+p { margin: 0; }
+
+/* ---------- 代码 ---------- */
+code, pre, kbd {
+  font-family: var(--pp-font-mono);
+}
+
+img, svg, video {
+  display: block;
+  max-width: 100%;
+}
+
+/* ---------- 表单元素继承字体 ---------- */
+button, input, select, textarea {
+  font-family: inherit;
+  font-size: inherit;
+}

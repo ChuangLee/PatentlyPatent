@@ -511,3 +511,47 @@ title: PatentlyPatent 迭代日志
 - markdown 真实渲染（当前 pre 纯文本；可加 marked + highlight.js）
 - kb 内全文搜索（/api/kb/search?q=...）+ FileTree 顶部加搜索框
 - 大文件（>5MB pdf）加分页或流式
+
+
+## v0.23 · 2026-05-08 15:35 · CAS 认证 + 现代化 UI 设计系统
+
+**A. CAS 协议认证（subagent）**
+- 后端 routes/auth_cas.py: 3 endpoints
+  - GET /api/auth/cas/login → 302 跳 ${CAS_SERVER}/login?service=...
+  - GET /api/auth/cas/callback?ticket → /p3/serviceValidate XML 解析 → 查/建用户(role=employee 自动创建) → 发 JWT → 302 跳前端 /login?token&user
+  - GET /api/auth/cas/logout → CAS 全局登出
+- 4 个 env: PP_CAS_ENABLED / PP_CAS_SERVER / PP_CAS_SERVICE / PP_CAS_FRONT_REDIRECT
+- pytest test_auth_cas.py 6 用例（成功/auth_failure/connect_error/invalid_ticket/server_unreachable/logout） — **全 pass**
+- 用 defusedxml 解析 CAS XML 防注入；httpx.MockTransport mock 测试
+- 前端 stores/auth.ts 加 loginViaCas + consumeCasCallback；Login 顶部按钮 v-if cas_enabled
+- /api/ping 加 cas_enabled 字段
+- docs/deploy_runbook.md 加 "CAS 对接" 节
+
+**B. 设计系统 + 全局主题（subagent）**
+- styles/tokens.css 109 行：indigo #5B6CFF 主色 + 语义色 + 8px 间距 + 6/10/14/20 圆角 + 4 级柔和阴影 + Inter+PingFang 字体栈 + 过渡曲线 + z-index
+- styles/global.css 107 行：body token + antialiased + ::selection 紫蓝 + webkit/firefox 滚动条 + :focus-visible 焦点环
+- styles/utilities.css 131 行：.pp-card / .pp-card-hover / .pp-stat / .pp-glass / .pp-gradient-bg / .pp-gradient-mesh / .pp-tag / .pp-text-truncate
+- App.vue 用 antd ConfigProvider 注入 theme: colorPrimary='#5B6CFF', borderRadius=10/14/6, fontFamily=Inter+PingFang
+- index.html preconnect Google Fonts + Inter 400/500/600/700
+
+**C. Login + DefaultLayout + Dashboard 重设计（subagent）**
+- Login.vue 320 行：左 60% hero（紫蓝粉三色斜向渐变 + 大字 logo + 3 条 feature bullets）+ 右 40% 卡片（CAS 按钮 + 角色选择）；< 900px 单栏；< 480px 角色单列；保留 CAS subagent 加的 loginViaCas / consumeCasCallback
+- DefaultLayout.vue 600 行：Header 56px（渐变小球 logo + brand + › + page title + 装饰搜索框 ⌘K + 通知 + 圆形 avatar 卡）+ Sidebar 260/64（用户卡 + 我的项目 4px primary 高亮条 + 文件树 + 版本号 v0.23）；保留三点菜单 / 归档 / 重命名等业务逻辑
+- Dashboard.vue 360 行：欢迎卡（三色渐变 wash + 渐变文字 name）+ 3 stats 卡（模糊光晕装饰）+ 项目卡片网格（hover 提升 translateY -2px + shadow-lg；4 段进度条 + 领域 pill + 「打开 →」hover letter-spacing）
+
+**测试 / 部署**
+- pnpm test 44/44 / pnpm build vue-tsc 通
+- backend pytest test_auth_cas 6/6 pass
+- 公网部署 200，ping 含 cas_enabled=false（需 env 启用）
+
+**修改/新增文件**
+- 后端：routes/auth_cas.py, tests/test_auth_cas.py, config.py (4 settings), main.py (router), deploy_runbook.md (CAS 节)
+- 前端：3 css 新（tokens/global/utilities）, App.vue (ConfigProvider), main.ts (import), index.html (Inter), stores/auth.ts (CAS 方法), Login.vue 全重写, DefaultLayout.vue 全重写, employee/Dashboard.vue 全重写
+
+**v0.23 总览：UI 视觉换代 + 企业 SSO 接入框架就绪**
+
+**下轮目标 (v0.24)**
+- 工作台 ProjectWorkbench / FileTree / FilePreviewer 视觉对齐新设计
+- admin Dashboard 视觉对齐（agent_runs 表 + 图表样式）
+- chat 气泡 / tool 卡片重设计
+- 真 CAS server 联调（用户提供企业 CAS URL 或选 Apereo demo 实测一次）

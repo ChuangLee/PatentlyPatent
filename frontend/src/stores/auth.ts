@@ -50,8 +50,35 @@ export const useAuthStore = defineStore('auth', () => {
     localStorage.removeItem(TOKEN_KEY);
   }
 
+  /** v0.23：跳后端 CAS 入口（后端会再 302 到 CAS server）。 */
+  function loginViaCas() {
+    const base = (import.meta.env.VITE_API_BASE as string | undefined) || '/api';
+    window.location.href = `${base}/auth/cas/login`;
+  }
+
+  /** v0.23：从 CAS 回调 URL 的 ?token=...&user=... 取出并落地，返回 user。 */
+  function consumeCasCallback(query: URLSearchParams): User | null {
+    const tk = query.get('token');
+    const userRaw = query.get('user');
+    if (!tk || !userRaw) return null;
+    try {
+      const u = JSON.parse(userRaw) as User;
+      user.value = u;
+      token.value = tk;
+      localStorage.setItem(KEY, JSON.stringify(u));
+      localStorage.setItem(TOKEN_KEY, tk);
+      return u;
+    } catch {
+      return null;
+    }
+  }
+
   const role = computed<Role | null>(() => user.value?.role ?? null);
   const isAuthenticated = computed(() => user.value !== null);
 
-  return { user, token, role, isAuthenticated, login, loginAs, logout };
+  return {
+    user, token, role, isAuthenticated,
+    login, loginAs, logout,
+    loginViaCas, consumeCasCallback,
+  };
 });

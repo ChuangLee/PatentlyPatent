@@ -6,7 +6,6 @@ import AInput from 'ant-design-vue/es/input';
 import message from 'ant-design-vue/es/message';
 import { useAuthStore } from '@/stores/auth';
 import { useUIStore } from '@/stores/ui';
-import { useFilesStore } from '@/stores/files';
 import { projectsApi } from '@/api/projects';
 import RoleBadge from '@/components/common/RoleBadge.vue';
 import FileTree from '@/components/workbench/FileTree.vue';
@@ -16,7 +15,6 @@ const router = useRouter();
 const route = useRoute();
 const auth = useAuthStore();
 const ui = useUIStore();
-const filesStore = useFilesStore();
 
 // 员工：sidebar 上半 = 我的项目（最多 4 个）；下半 = 当前项目文件树
 const myProjects = ref<Project[]>([]);
@@ -27,8 +25,6 @@ async function loadMyProjects() {
   loadingProjects.value = true;
   try {
     const list = await projectsApi.list({ ownerId: auth.user.id });
-    // 按 updatedAt desc 排，取前 4
-    // v0.14-D: 归档项目不进 sidebar 4 条；先 filter 再排序
     myProjects.value = list
       .filter((p) => !p.archived)
       .sort((a, b) => (a.updatedAt < b.updatedAt ? 1 : -1))
@@ -39,7 +35,7 @@ async function loadMyProjects() {
 }
 
 onMounted(loadMyProjects);
-watch(() => route.fullPath, loadMyProjects);  // 路由变更时刷新（新建项目后回到 dashboard）
+watch(() => route.fullPath, loadMyProjects);
 
 const STATUS_COLOR: Record<ProjectStatus, string> = {
   drafting: 'default',
@@ -52,13 +48,11 @@ const STATUS_LABEL: Record<ProjectStatus, string> = {
   drafting: '草稿', researching: '挖掘中', reporting: '检索完成', completed: '已完成',
 };
 
-/** v0.12-A: 4 段点状进度（drafting=1/4, researching=2/4, reporting=3/4, completed=4/4） */
 function stageDots(s: ProjectStatus): boolean[] {
   const lvl = { drafting: 1, researching: 2, reporting: 3, completed: 4 }[s] ?? 0;
   return [0, 1, 2, 3].map(i => i < lvl);
 }
 
-// 当前路由是否在某项目工作台内（决定是否高亮文件树/隐藏空态）
 const currentProjectId = computed(() => {
   const m = route.path.match(/\/projects\/([^/]+)\//);
   return m ? m[1] : null;
@@ -76,7 +70,6 @@ function newProject() {
   router.push('/employee/dashboard?new=1');
 }
 
-/** v0.13-B: 项目右键菜单 — 重命名 / 归档 / 删除 */
 function renameProject(p: Project) {
   const newTitle = ref(p.title);
   AModal.confirm({
@@ -137,7 +130,6 @@ function deleteProject(p: Project) {
       try {
         await projectsApi.remove(p.id);
         message.success('项目已删除');
-        // 若当前正在被删的项目工作台内，回到 dashboard
         if (currentProjectId.value === p.id) {
           router.push('/employee/dashboard');
         }
@@ -149,7 +141,6 @@ function deleteProject(p: Project) {
   });
 }
 
-/** v0.14-A: 抽出菜单点击处理，contextmenu 和 ⋯ click 复用 */
 function onProjectMenuClick(p: Project, e: any) {
   e?.domEvent?.stopPropagation?.();
   if (e.key === 'rename') renameProject(p);
@@ -162,7 +153,6 @@ function logout() {
   router.push('/login');
 }
 
-// admin 仍用菜单
 interface MenuItem { key: string; label: string; icon?: string; disabled?: boolean }
 const adminMenuItems = computed<MenuItem[]>(() => [
   { key: '/admin/dashboard', label: '总览', icon: '📊' },
@@ -174,34 +164,81 @@ const selectedKeys = computed(() => [route.path]);
 function onMenuClick({ key }: { key: string }) {
   if (key !== 'sep') router.push(key);
 }
+
+// Header 当前页面标题
+const currentTitle = computed(() => (route.meta?.title as string) || '');
+
+// 用户首字母 avatar
+const avatarLetter = computed(() => {
+  const n = auth.user?.name || '';
+  return n ? n.slice(0, 1).toUpperCase() : '?';
+});
+
+const userDept = computed(() => auth.user?.department || '');
+
+// 装饰性搜索框（暂不接逻辑）
+const searchValue = ref('');
+
+const APP_VERSION = 'v0.23';
 </script>
 
 <template>
-  <a-layout style="min-height:100vh">
-    <a-layout-sider :collapsed="ui.sidebarCollapsed" collapsible
-                    :width="280"
-                    @update:collapsed="ui.toggleSidebar()" theme="light"
-                    style="display:flex;flex-direction:column">
-      <div class="pp-brand">
-        <strong>PatentlyPatent</strong>
+  <a-layout class="pp-shell">
+    <!-- ================= Sidebar ================= -->
+    <a-layout-sider
+      :collapsed="ui.sidebarCollapsed"
+      collapsible
+      :width="260"
+      :collapsed-width="64"
+      :trigger="null"
+      theme="light"
+      class="pp-sider"
+    >
+      <!-- 顶部 brand + 折叠按钮 -->
+      <div class="pp-sider__brand">
+        <a class="pp-sider__brand-link" @click="router.push(auth.role === 'admin' ? '/admin/dashboard' : '/employee/dashboard')">
+          <span class="pp-sider__logo">PP</span>
+          <span v-if="!ui.sidebarCollapsed" class="pp-sider__brand-text">PatentlyPatent</span>
+        </a>
+        <button
+          type="button"
+          class="pp-sider__collapse"
+          :title="ui.sidebarCollapsed ? '展开侧栏' : '收起侧栏'"
+          @click="ui.toggleSidebar()"
+        >
+          <span>{{ ui.sidebarCollapsed ? '»' : '«' }}</span>
+        </button>
       </div>
 
-      <!-- 员工 sidebar：上半项目列表 + 下半文件树 -->
-      <div v-if="auth.role === 'employee'" class="pp-sider-employee">
-        <!-- 上半：我的项目（紧凑，最多 4） -->
+      <!-- 用户卡片 -->
+      <div v-if="!ui.sidebarCollapsed && auth.user" class="pp-sider__user">
+        <div class="pp-sider__avatar">{{ avatarLetter }}</div>
+        <div class="pp-sider__user-meta">
+          <div class="pp-sider__user-name">{{ auth.user.name }}</div>
+          <div class="pp-sider__user-sub">
+            {{ auth.role === 'admin' ? '管理员' : '员工' }}
+            <span v-if="userDept">· {{ userDept }}</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- 员工 sidebar -->
+      <div v-if="auth.role === 'employee'" class="pp-sider__body">
         <div class="pp-sec">
           <div class="pp-sec-head">
             <span>我的项目</span>
-            <a-tooltip title="查看全部"><a-button type="link" size="small" @click="goAllProjects">全部 →</a-button></a-tooltip>
+            <a-button type="link" size="small" class="pp-sec-link" @click="goAllProjects">全部 →</a-button>
           </div>
           <a-spin :spinning="loadingProjects" size="small">
             <div v-if="!loadingProjects && myProjects.length === 0" class="pp-empty">还没有项目</div>
             <div v-else class="pp-proj-list">
               <a-dropdown v-for="p in myProjects" :key="p.id" :trigger="['contextmenu']">
-                <div class="pp-proj-item"
-                     :class="{ 'pp-proj-active': currentProjectId === p.id, 'pp-proj-archived': p.archived }"
-                     @click="goProject(p)">
-                  <!-- v0.14-A: hover 显示 ⋯ 三点菜单按钮，click 触发同一菜单 -->
+                <div
+                  class="pp-proj-item"
+                  :class="{ 'pp-proj-active': currentProjectId === p.id, 'pp-proj-archived': p.archived }"
+                  @click="goProject(p)"
+                >
+                  <span v-if="currentProjectId === p.id" class="pp-proj-rail" aria-hidden="true" />
                   <a-dropdown :trigger="['click']">
                     <a-button
                       type="text"
@@ -225,12 +262,11 @@ function onMenuClick({ key }: { key: string }) {
                     {{ p.title }}
                   </div>
                   <div class="pp-proj-meta">
-                    <!-- v0.12-A: 4 段进度徽章（报门→挖掘→检索→完成） -->
                     <span class="pp-stage" :title="STATUS_LABEL[p.status]">
                       <span v-for="(filled, i) in stageDots(p.status)" :key="i"
                             class="pp-dot" :class="{ on: filled }" />
                     </span>
-                    <a-tag :color="STATUS_COLOR[p.status]" style="margin:0 0 0 6px;font-size:11px">
+                    <a-tag :color="STATUS_COLOR[p.status]" class="pp-proj-status-tag">
                       {{ STATUS_LABEL[p.status] }}
                     </a-tag>
                   </div>
@@ -248,26 +284,37 @@ function onMenuClick({ key }: { key: string }) {
               </a-dropdown>
             </div>
           </a-spin>
-          <a-button type="primary" block size="small" style="margin-top:8px" @click="newProject">
-            ✨ 新建报门（登记新创意）
+          <a-button
+            type="primary"
+            block
+            size="small"
+            class="pp-newproj-btn"
+            @click="newProject"
+          >
+            ✨ 新建报门
           </a-button>
         </div>
 
-        <a-divider style="margin:8px 0" />
+        <div class="pp-sec-divider" />
 
-        <!-- 下半：当前项目文件树 -->
         <div class="pp-sec pp-sec-grow">
           <div class="pp-sec-head">
             <span>📁 项目文件</span>
-            <span v-if="!currentProjectId" style="color:#aaa;font-size:12px">未选项目</span>
+            <span v-if="!currentProjectId" class="pp-sec-tip">未选项目</span>
           </div>
           <div v-if="!currentProjectId" class="pp-empty">在上方选一个项目以查看文件</div>
           <FileTree v-else :project-id="currentProjectId" />
         </div>
       </div>
 
-      <!-- admin sidebar：传统菜单 -->
-      <a-menu v-else :selected-keys="selectedKeys" mode="inline" @click="onMenuClick">
+      <!-- admin sidebar -->
+      <a-menu
+        v-else
+        :selected-keys="selectedKeys"
+        mode="inline"
+        class="pp-admin-menu"
+        @click="onMenuClick"
+      >
         <template v-for="item in adminMenuItems" :key="item.key">
           <a-menu-item v-if="!item.disabled" :key="item.key">
             <span>{{ item.icon }} {{ item.label }}</span>
@@ -275,18 +322,54 @@ function onMenuClick({ key }: { key: string }) {
           <a-menu-divider v-else />
         </template>
       </a-menu>
+
+      <!-- 版本号 -->
+      <div v-if="!ui.sidebarCollapsed" class="pp-sider__foot">
+        PatentlyPatent · {{ APP_VERSION }}
+      </div>
     </a-layout-sider>
 
-    <a-layout>
-      <a-layout-header style="background:#fff;padding:0 24px;border-bottom:1px solid #eee;display:flex;justify-content:space-between;align-items:center">
-        <span>{{ route.meta.title || '' }}</span>
-        <span>
-          {{ auth.user?.name }}
-          <RoleBadge :role="auth.role" />
-          <a-button type="link" size="small" @click="logout">退出</a-button>
-        </span>
+    <a-layout class="pp-main">
+      <!-- ================= Header ================= -->
+      <a-layout-header class="pp-header">
+        <div class="pp-header__left">
+          <span class="pp-header__brand-mini">
+            <span class="pp-header__brand-dot" />
+            <strong>PatentlyPatent</strong>
+          </span>
+          <span v-if="currentTitle" class="pp-header__sep">›</span>
+          <span v-if="currentTitle" class="pp-header__page">{{ currentTitle }}</span>
+        </div>
+
+        <div class="pp-header__right">
+          <div class="pp-header__search">
+            <span class="pp-header__search-icon">🔍</span>
+            <input
+              v-model="searchValue"
+              class="pp-header__search-input"
+              placeholder="搜项目 / 知识 / 命令..."
+            />
+            <span class="pp-header__search-kbd">⌘K</span>
+          </div>
+
+          <button class="pp-header__icon-btn" title="通知">
+            🔔
+            <span class="pp-header__badge" />
+          </button>
+
+          <div class="pp-header__user">
+            <div class="pp-header__avatar">{{ avatarLetter }}</div>
+            <div class="pp-header__user-text">
+              <div class="pp-header__user-name">{{ auth.user?.name }}</div>
+              <RoleBadge :role="auth.role" />
+            </div>
+          </div>
+
+          <a-button type="text" size="small" class="pp-header__logout" @click="logout">退出</a-button>
+        </div>
       </a-layout-header>
-      <a-layout-content style="margin:24px;background:#fff;padding:24px;border-radius:6px">
+
+      <a-layout-content class="pp-content">
         <router-view />
       </a-layout-content>
     </a-layout>
@@ -294,19 +377,131 @@ function onMenuClick({ key }: { key: string }) {
 </template>
 
 <style scoped>
-.pp-brand {
-  padding: 16px;
-  text-align: center;
-  border-bottom: 1px solid #eee;
+.pp-shell {
+  min-height: 100vh;
+  background: var(--pp-color-bg);
 }
-.pp-sider-employee {
+
+/* ================= Sidebar ================= */
+.pp-sider {
+  background: var(--pp-color-surface) !important;
+  border-right: 1px solid var(--pp-color-border-soft);
   display: flex;
   flex-direction: column;
-  height: calc(100vh - 56px);   /* 减去 brand 高度 */
-  overflow: hidden;
+  position: relative;
 }
+.pp-sider :deep(.ant-layout-sider-children) {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+}
+.pp-sider__brand {
+  height: var(--pp-header-h, 56px);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 12px;
+  border-bottom: 1px solid var(--pp-color-border-soft);
+}
+.pp-sider__brand-link {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  cursor: pointer;
+  color: var(--pp-color-text);
+  text-decoration: none;
+  flex: 1;
+  min-width: 0;
+}
+.pp-sider__logo {
+  width: 32px;
+  height: 32px;
+  border-radius: var(--pp-radius-md);
+  background: linear-gradient(135deg, #5B6CFF 0%, #8B5CF6 100%);
+  color: #fff;
+  font-weight: 700;
+  font-size: 13px;
+  letter-spacing: 0.5px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  box-shadow: 0 2px 6px rgba(91, 108, 255, 0.28);
+}
+.pp-sider__brand-text {
+  font-weight: 600;
+  font-size: 14px;
+  letter-spacing: 0.2px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.pp-sider__collapse {
+  border: none;
+  background: transparent;
+  color: var(--pp-color-text-tertiary);
+  cursor: pointer;
+  width: 24px;
+  height: 24px;
+  border-radius: var(--pp-radius-sm);
+  font-size: 14px;
+  flex-shrink: 0;
+}
+.pp-sider__collapse:hover {
+  background: var(--pp-color-bg-elevated);
+  color: var(--pp-color-text);
+}
+
+.pp-sider__user {
+  margin: var(--pp-space-3);
+  padding: 10px 12px;
+  border-radius: var(--pp-radius-md);
+  background: var(--pp-color-bg-elevated);
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  border: 1px solid var(--pp-color-border-soft);
+}
+.pp-sider__avatar {
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  background: linear-gradient(135deg, #5B6CFF 0%, #8B5CF6 100%);
+  color: #fff;
+  font-weight: 600;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 13px;
+  flex-shrink: 0;
+}
+.pp-sider__user-meta { min-width: 0; flex: 1; }
+.pp-sider__user-name {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--pp-color-text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.pp-sider__user-sub {
+  font-size: 11px;
+  color: var(--pp-color-text-tertiary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.pp-sider__body {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  overflow: hidden;
+  min-height: 0;
+}
+
 .pp-sec {
-  padding: 8px 12px;
+  padding: var(--pp-space-3);
 }
 .pp-sec-grow {
   flex: 1;
@@ -318,36 +513,55 @@ function onMenuClick({ key }: { key: string }) {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  padding: 4px 0;
-  font-size: 12px;
-  color: #666;
+  padding: 4px 0 8px;
+  font-size: 11px;
+  color: var(--pp-color-text-tertiary);
   font-weight: 600;
+  letter-spacing: 0.4px;
+  text-transform: uppercase;
 }
+.pp-sec-link { padding: 0; height: auto; font-size: 11px; }
+.pp-sec-tip { color: var(--pp-color-text-tertiary); font-size: 11px; }
+.pp-sec-divider {
+  height: 1px;
+  background: var(--pp-color-border-soft);
+  margin: 4px var(--pp-space-3);
+}
+
 .pp-empty {
   padding: 16px 0;
   text-align: center;
-  color: #aaa;
+  color: var(--pp-color-text-tertiary);
   font-size: 12px;
 }
 .pp-proj-list {
   display: flex;
   flex-direction: column;
   gap: 4px;
-  max-height: 220px;     /* 卡 4 项左右 */
+  max-height: 240px;
   overflow: auto;
 }
 .pp-proj-item {
   position: relative;
-  padding: 6px 8px;
-  border-radius: 6px;
+  padding: 8px 10px 8px 14px;
+  border-radius: var(--pp-radius-md);
   cursor: pointer;
   border: 1px solid transparent;
-  transition: background 0.15s;
+  transition: var(--pp-transition);
+  background: transparent;
 }
 .pp-proj-item:hover {
-  background: #f5f8ff;
+  background: var(--pp-color-primary-soft);
 }
-/* v0.14-A: ⋯ 按钮 hover 时显示 */
+.pp-proj-rail {
+  position: absolute;
+  left: 0;
+  top: 8px;
+  bottom: 8px;
+  width: 4px;
+  border-radius: 2px;
+  background: var(--pp-color-primary);
+}
 .pp-proj-actions {
   position: absolute;
   top: 6px;
@@ -358,7 +572,7 @@ function onMenuClick({ key }: { key: string }) {
   height: 20px !important;
   line-height: 18px !important;
   font-size: 16px !important;
-  color: #666;
+  color: var(--pp-color-text-tertiary);
   z-index: 1;
 }
 .pp-proj-item:hover .pp-proj-actions {
@@ -366,44 +580,39 @@ function onMenuClick({ key }: { key: string }) {
 }
 .pp-proj-actions:hover {
   background: rgba(0, 0, 0, 0.06) !important;
-  color: #1677ff;
+  color: var(--pp-color-primary);
 }
 @media (hover: none) {
-  .pp-proj-actions {
-    opacity: 1;
-  }
+  .pp-proj-actions { opacity: 1; }
 }
 .pp-proj-active {
-  background: #e6f0ff;
-  border-color: #91caff;
+  background: var(--pp-color-primary-soft);
+}
+.pp-proj-active .pp-proj-title {
+  color: var(--pp-color-primary);
+  font-weight: 600;
 }
 .pp-proj-archived {
   opacity: 0.55;
-  background: #fafafa;
+  background: var(--pp-color-bg-elevated);
 }
 .pp-proj-archived .pp-proj-title {
   text-decoration: line-through;
-  text-decoration-color: #bbb;
+  text-decoration-color: var(--pp-color-text-tertiary);
 }
-.pp-archived-tag {
-  margin-right: 4px;
-}
-/* v0.12-A: 阶段点 */
-.pp-stage {
-  display: inline-flex;
-  gap: 3px;
-  vertical-align: middle;
-}
+.pp-archived-tag { margin-right: 4px; }
+
+.pp-stage { display: inline-flex; gap: 3px; vertical-align: middle; }
 .pp-dot {
   width: 6px;
   height: 6px;
   border-radius: 50%;
-  background: #d9d9d9;
+  background: var(--pp-color-border);
   display: inline-block;
 }
 .pp-dot.on {
-  background: #1677ff;
-  box-shadow: 0 0 4px rgba(22, 119, 255, 0.4);
+  background: var(--pp-color-primary);
+  box-shadow: 0 0 4px rgba(91, 108, 255, 0.4);
 }
 .pp-proj-title {
   font-size: 13px;
@@ -412,8 +621,197 @@ function onMenuClick({ key }: { key: string }) {
   -webkit-line-clamp: 2;
   -webkit-box-orient: vertical;
   overflow: hidden;
+  color: var(--pp-color-text);
 }
-.pp-proj-meta {
-  margin-top: 4px;
+.pp-proj-meta { margin-top: 6px; }
+.pp-proj-status-tag {
+  margin: 0 0 0 6px !important;
+  font-size: 11px !important;
+}
+.pp-newproj-btn {
+  margin-top: var(--pp-space-3);
+  height: 36px;
+  border-radius: var(--pp-radius-md);
+  font-weight: 500;
+}
+
+.pp-admin-menu {
+  border-right: none !important;
+  padding: var(--pp-space-3);
+  background: transparent !important;
+}
+
+.pp-sider__foot {
+  padding: 10px var(--pp-space-3);
+  font-size: 11px;
+  color: var(--pp-color-text-tertiary);
+  text-align: center;
+  border-top: 1px solid var(--pp-color-border-soft);
+  letter-spacing: 0.3px;
+}
+
+/* ================= Header ================= */
+.pp-main { background: var(--pp-color-bg); }
+.pp-header {
+  height: var(--pp-header-h, 56px);
+  line-height: normal;
+  background: var(--pp-color-surface) !important;
+  border-bottom: 1px solid var(--pp-color-border-soft);
+  padding: 0 var(--pp-space-5) !important;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--pp-space-4);
+}
+.pp-header__left {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+.pp-header__brand-mini {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 14px;
+  color: var(--pp-color-text);
+  letter-spacing: 0.2px;
+}
+.pp-header__brand-dot {
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  background: linear-gradient(135deg, #5B6CFF 0%, #8B5CF6 60%, #EC4899 100%);
+  display: inline-block;
+  flex-shrink: 0;
+  box-shadow: 0 2px 6px rgba(91, 108, 255, 0.32);
+}
+.pp-header__sep {
+  color: var(--pp-color-text-tertiary);
+  font-size: 14px;
+}
+.pp-header__page {
+  color: var(--pp-color-text-secondary);
+  font-size: 13px;
+  font-weight: 500;
+}
+
+.pp-header__right {
+  display: flex;
+  align-items: center;
+  gap: var(--pp-space-3);
+}
+
+.pp-header__search {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  height: 32px;
+  padding: 0 10px;
+  border-radius: var(--pp-radius-md);
+  background: var(--pp-color-bg-elevated);
+  border: 1px solid transparent;
+  width: 220px;
+  transition: var(--pp-transition);
+}
+.pp-header__search:focus-within {
+  background: var(--pp-color-surface);
+  border-color: var(--pp-color-primary);
+  box-shadow: var(--pp-shadow-focus);
+}
+.pp-header__search-icon { font-size: 13px; color: var(--pp-color-text-tertiary); }
+.pp-header__search-input {
+  flex: 1;
+  border: none;
+  outline: none;
+  background: transparent;
+  font-size: 13px;
+  color: var(--pp-color-text);
+  font-family: inherit;
+  min-width: 0;
+}
+.pp-header__search-input::placeholder { color: var(--pp-color-text-tertiary); }
+.pp-header__search-kbd {
+  font-size: 10px;
+  color: var(--pp-color-text-tertiary);
+  border: 1px solid var(--pp-color-border);
+  border-radius: 4px;
+  padding: 1px 5px;
+  background: var(--pp-color-surface);
+  letter-spacing: 0.5px;
+}
+
+.pp-header__icon-btn {
+  position: relative;
+  width: 32px;
+  height: 32px;
+  border-radius: var(--pp-radius-md);
+  border: none;
+  background: transparent;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 16px;
+  color: var(--pp-color-text-secondary);
+  transition: var(--pp-transition);
+}
+.pp-header__icon-btn:hover {
+  background: var(--pp-color-bg-elevated);
+  color: var(--pp-color-text);
+}
+.pp-header__badge {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--pp-color-danger);
+  border: 1.5px solid var(--pp-color-surface);
+}
+
+.pp-header__user {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 10px 4px 4px;
+  border-radius: var(--pp-radius-full);
+  background: var(--pp-color-bg-elevated);
+}
+.pp-header__avatar {
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  background: linear-gradient(135deg, #5B6CFF 0%, #8B5CF6 100%);
+  color: #fff;
+  font-weight: 600;
+  font-size: 12px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+.pp-header__user-text { display: flex; align-items: center; gap: 2px; }
+.pp-header__user-name {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--pp-color-text);
+}
+.pp-header__logout { color: var(--pp-color-text-secondary); }
+
+/* ================= Content ================= */
+.pp-content {
+  margin: var(--pp-space-5);
+  padding: var(--pp-space-5) var(--pp-space-6);
+  background: transparent;
+  border-radius: 0;
+  min-height: calc(100vh - var(--pp-header-h, 56px) - 40px);
+}
+
+/* ================= 响应式 ================= */
+@media (max-width: 900px) {
+  .pp-header__search { display: none; }
+  .pp-header__user-text { display: none; }
+  .pp-content { margin: var(--pp-space-3); padding: var(--pp-space-4); }
 }
 </style>
