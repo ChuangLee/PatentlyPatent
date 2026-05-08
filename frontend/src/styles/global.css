@@ -105,3 +105,8 @@ button, input, select, textarea {
   font-family: inherit;
   font-size: inherit;
 }
+
+/* v0.27: 全局兜底 — modal close 叉号永远完整可见，避免被自定义渐变 header / 圆角切掉 */
+.ant-modal-close {
+  z-index: 10 !important;
+}

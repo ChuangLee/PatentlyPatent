@@ -95,7 +95,12 @@ def get_kb_file(path: str = Query(...)):
             )
         except UnicodeDecodeError:
             pass
-    return FileResponse(full, media_type=mime, filename=full.name)
+    # v0.27: 让 pdf / 图片 inline 预览，不强制下载（FastAPI FileResponse 默认 attachment）
+    from urllib.parse import quote
+    headers = {
+        "Content-Disposition": f"inline; filename*=utf-8''{quote(full.name)}"
+    }
+    return FileResponse(full, media_type=mime, headers=headers)
 
 
 @router.get("/stats", response_model=dict)

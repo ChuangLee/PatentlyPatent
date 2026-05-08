@@ -357,6 +357,29 @@ function onCancel() {
   height: 24px;
   background: linear-gradient(135deg, var(--pp-color-primary) 0%, #8B5CF6 50%, #EC4899 100%);
   z-index: 1;
+  pointer-events: none;
+}
+/* v0.27 fix: close 叉号悬浮于渐变条之上，避免被圆角切一半 */
+.pp-newproj-wrap .ant-modal-close {
+  z-index: 10;
+  top: 4px !important;
+  right: 4px !important;
+  width: 32px !important;
+  height: 32px !important;
+  border-radius: var(--pp-radius-sm);
+  display: flex !important;
+  align-items: center;
+  justify-content: center;
+  color: #fff;
+}
+.pp-newproj-wrap .ant-modal-close-x {
+  color: #fff !important;
+  font-size: 14px;
+  line-height: 1;
+}
+.pp-newproj-wrap .ant-modal-close:hover {
+  background: rgba(255, 255, 255, 0.20);
+  color: #fff;
 }
 .pp-newproj-wrap .ant-modal-header {
   padding: calc(24px + var(--pp-space-4)) var(--pp-space-5) var(--pp-space-3);

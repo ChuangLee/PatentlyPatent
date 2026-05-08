@@ -400,7 +400,36 @@ async function onNativeDrop(e: DragEvent) {
 const kbPreviewOpen = ref(false);
 const kbPreviewNode = ref<FileNode | null>(null);
 const kbPreviewContent = ref('');
+const kbPreviewHtml = ref('');   // v0.27: md 渲染后的 HTML
 const kbPreviewLoading = ref(false);
+
+/** v0.27: 把 md 内的相对图片路径转成 kb file 端点；保持绝对 URL 不变 */
+function _resolveKbImgSrc(currentMdPath: string, src: string): string {
+  if (/^https?:\/\//i.test(src) || src.startsWith('data:')) return src;
+  // 相对路径：基于 md 所在目录
+  const dir = currentMdPath.includes('/') ? currentMdPath.replace(/\/[^/]*$/, '') : '';
+  const joined = dir ? `${dir}/${src.replace(/^\.?\//, '')}` : src.replace(/^\.?\//, '');
+  return kbDownloadUrl(joined);
+}
+
+function _escapeHtml(s: string): string {
+  return s.replace(/[&<>"']/g, c =>
+    ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c] as string));
+}
+
+async function _renderMarkdown(md: string, mdPath: string): Promise<string> {
+  const { marked } = await import('marked');
+  const DOMPurify = (await import('dompurify')).default;
+  const renderer = new marked.Renderer();
+  renderer.image = (img: any) => {
+    const href = _resolveKbImgSrc(mdPath, String(img.href || ''));
+    const title = img.title ? ` title="${_escapeHtml(String(img.title))}"` : '';
+    const alt = img.text ? _escapeHtml(String(img.text)) : '';
+    return `<img src="${_escapeHtml(href)}" alt="${alt}"${title} loading="lazy" />`;
+  };
+  const html = await marked.parse(md, { renderer, breaks: true, gfm: true }) as string;
+  return DOMPurify.sanitize(html, { ADD_ATTR: ['target', 'loading'] });
+}
 
 function findKbNode(id: string): FileNode | null {
   for (const arr of Object.values(kbChildrenById.value)) {
@@ -414,13 +443,22 @@ async function openKbPreview(node: FileNode) {
   kbPreviewNode.value = node;
   kbPreviewOpen.value = true;
   kbPreviewContent.value = '';
+  kbPreviewHtml.value = '';
   if (node.kind !== 'file' || !node.kbPath) return;
   const m = node.mime || '';
   // 二进制类不预加载，让 iframe 走 url
   if (m.startsWith('application/pdf') || m.startsWith('image/')) return;
   kbPreviewLoading.value = true;
   try {
-    kbPreviewContent.value = await kbApi.file(node.kbPath);
+    const text = await kbApi.file(node.kbPath);
+    kbPreviewContent.value = text;
+    if (m === 'text/markdown') {
+      kbPreviewHtml.value = await _renderMarkdown(text, node.kbPath);
+    } else if (m === 'text/html') {
+      // 已是 html，让 sanitize 兜底
+      const DOMPurify = (await import('dompurify')).default;
+      kbPreviewHtml.value = DOMPurify.sanitize(text, { ADD_ATTR: ['target'] });
+    }
   } catch (e: any) {
     kbPreviewContent.value = `（加载失败：${e?.message || e}）`;
   } finally {
@@ -847,7 +885,13 @@ function renderNodeTitle(node: AntdTreeNode) {
           :src="kbDownloadUrl(kbPreviewNode.kbPath)"
           style="max-width:100%;height:auto"
         />
-        <!-- markdown / 文本 / json / html：纯文本展示 -->
+        <!-- v0.27: markdown / html 用 marked + DOMPurify 渲染 -->
+        <div
+          v-else-if="kbPreviewHtml && ((kbPreviewNode.mime || '') === 'text/markdown' || (kbPreviewNode.mime || '') === 'text/html')"
+          class="pp-kb-md"
+          v-html="kbPreviewHtml"
+        />
+        <!-- 其他文本/json：纯文本展示 -->
         <pre
           v-else
           style="white-space:pre-wrap;word-break:break-word;font-family:inherit;font-size:13px;line-height:1.65;margin:0"
@@ -1016,10 +1060,92 @@ function renderNodeTitle(node: AntdTreeNode) {
   color: var(--pp-color-text-inverse) !important;
   font-weight: var(--pp-font-weight-semibold);
 }
+/* v0.27 fix: 让 close 叉号完整显示在圆角内，避免被 overflow:hidden 切一半 */
 .pp-kb-modal .ant-modal-close {
-  color: var(--pp-color-text-inverse);
+  top: 8px !important;
+  right: 8px !important;
+  width: 32px !important;
+  height: 32px !important;
+  border-radius: var(--pp-radius-sm);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #fff;
+  z-index: 10;
+}
+.pp-kb-modal .ant-modal-close-x {
+  font-size: 16px;
+  line-height: 1;
 }
 .pp-kb-modal .ant-modal-close:hover {
-  color: var(--pp-color-primary-soft);
+  background: rgba(255, 255, 255, 0.18);
+  color: #fff;
+}
+
+/* v0.27: markdown 渲染样式 */
+.pp-kb-md {
+  font-size: 14px;
+  line-height: 1.75;
+  color: var(--pp-color-text);
+}
+.pp-kb-md h1, .pp-kb-md h2, .pp-kb-md h3, .pp-kb-md h4 {
+  margin: 1.4em 0 0.6em;
+  font-weight: 600;
+  color: var(--pp-color-text);
+}
+.pp-kb-md h1 { font-size: 22px; }
+.pp-kb-md h2 { font-size: 18px; border-bottom: 1px solid var(--pp-color-border-soft); padding-bottom: 6px; }
+.pp-kb-md h3 { font-size: 16px; }
+.pp-kb-md p { margin: 0.7em 0; }
+.pp-kb-md a { color: var(--pp-color-primary); text-decoration: none; }
+.pp-kb-md a:hover { text-decoration: underline; }
+.pp-kb-md img {
+  max-width: 100%;
+  height: auto;
+  border-radius: var(--pp-radius-sm);
+  border: 1px solid var(--pp-color-border-soft);
+  margin: 0.6em 0;
+  background: var(--pp-color-bg);
+}
+.pp-kb-md code {
+  background: var(--pp-color-bg);
+  padding: 2px 6px;
+  border-radius: var(--pp-radius-sm);
+  font-family: var(--pp-font-mono);
+  font-size: 12.5px;
+}
+.pp-kb-md pre {
+  background: var(--pp-color-bg);
+  padding: 12px 14px;
+  border-radius: var(--pp-radius-md);
+  overflow-x: auto;
+  border: 1px solid var(--pp-color-border-soft);
+}
+.pp-kb-md pre code { background: transparent; padding: 0; }
+.pp-kb-md blockquote {
+  margin: 0.8em 0;
+  padding: 4px 14px;
+  border-left: 3px solid var(--pp-color-primary);
+  background: var(--pp-color-primary-soft);
+  color: var(--pp-color-text-secondary);
+  border-radius: 0 var(--pp-radius-sm) var(--pp-radius-sm) 0;
+}
+.pp-kb-md ul, .pp-kb-md ol { padding-left: 1.6em; }
+.pp-kb-md li { margin: 0.3em 0; }
+.pp-kb-md table {
+  border-collapse: collapse;
+  margin: 0.8em 0;
+  width: 100%;
+}
+.pp-kb-md th, .pp-kb-md td {
+  border: 1px solid var(--pp-color-border-soft);
+  padding: 6px 10px;
+  text-align: left;
+}
+.pp-kb-md th { background: var(--pp-color-bg); font-weight: 600; }
+.pp-kb-md hr {
+  border: none;
+  border-top: 1px solid var(--pp-color-border-soft);
+  margin: 1.6em 0;
 }
 </style>
