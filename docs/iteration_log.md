@@ -217,3 +217,31 @@ title: PatentlyPatent 迭代日志
 - 子目标：先 spike 一版「单 endpoint /agent/mine 走 SDK」对比当前 mining.py 输出质量
 - vendor-antd 1.2MB 拆按需 import（去掉一些组件全量 import，可能要换 unplugin-vue-components + ant-design-vue/es/xxx）
 - Dashboard echarts 改异步 import（路由进 admin 时才加载）
+
+
+## v0.16-A · 2026-05-08 09:50 · Claude Agent SDK spike-B 跑通
+
+**调研** claude-agent-sdk 0.1.77（PyPI），底层走 Claude Code CLI 子进程；@tool 装饰器 + create_sdk_mcp_server + ClaudeAgentOptions(mcp_servers={...}, allowed_tools=[...])
+
+**实现**
+- 新增 `backend/app/agent_sdk_spike.py`：定义 search_patents tool（包智慧芽 query_search_count），双路径——真 SDK + mock；事件统一翻译为 dict {type: thinking/tool_use/tool_result/delta/done/error}
+- 新增 `backend/app/routes/agent.py`：POST /api/agent/mine_spike 走 sse-starlette；prefix=/api 挂入 main.py
+- 新增 `docs/agent_sdk_spike.md`：API 示例 + 与 mining.py 对比 + TODO
+- **未动** mining.py / llm.py / chat 路由 / 前端
+
+**测试**
+- 公网 curl POST /api/agent/mine_spike → 11 事件 SSE 流（thinking + tool_use + tool_result count=2458 + delta×7 + done）
+- 老 /api/ping /api/projects 零回归
+- mock 模式跑通；真 SDK 路径已写但需 ANTHROPIC_API_KEY 环境验证
+
+**Limitation**
+- 服务器 use_real_llm=false，真 SDK 路径未实测
+- 仅 1 个 tool，trends/applicants 待加
+- systemd 部署需 PATH 能找到 `claude` 二进制（SDK 默认子进程模式）
+
+**下轮目标 (v0.16 剩余)**
+- 真 SDK 路径在有 key 环境跑通（小步：本地 dev + ANTHROPIC_API_KEY 环境变量验证）
+- 加更多 tool：search_trends / search_applicants / file_write_section
+- vendor-antd 1.2MB 按需 import（unplugin 或手动）
+- admin Dashboard echarts 改异步 import
+- docs/architecture_v0.16.md 架构对比图（mermaid）
