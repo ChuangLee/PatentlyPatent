@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ref, reactive, computed } from 'vue';
 import { useRouter } from 'vue-router';
-import { message } from 'ant-design-vue';
+import { Progress as AProgress, message } from 'ant-design-vue';
 import { projectsApi } from '@/api/projects';
 import { useAuthStore } from '@/stores/auth';
 import type { Domain, ProjectStage, ProjectGoal, Attachment } from '@/types';
@@ -45,14 +45,68 @@ const GOALS: { value: ProjectGoal; label: string; desc: string }[] = [
 
 const attachmentCount = computed(() => attachments.value.length);
 
+// v0.15-D: 批传进度（复用 v0.14-B 视觉风格）
+const uploadIndex = ref(0);
+const uploadTotal = ref(0);
+const uploadCurrentName = ref('');
+const uploading = computed(() => uploadTotal.value > 0 && uploadIndex.value < uploadTotal.value);
+const uploadPercent = computed(() =>
+  uploadTotal.value > 0 ? Math.round((uploadIndex.value / uploadTotal.value) * 100) : 0,
+);
+
 function genId() { return `att-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`; }
 
-function beforeUpload(file: File) {
+function isTextLike(name: string, mime: string): boolean {
+  const lower = name.toLowerCase();
+  if (lower.endsWith('.md') || lower.endsWith('.txt') || lower.endsWith('.json')) return true;
+  if (lower.endsWith('.py') || lower.endsWith('.js') || lower.endsWith('.ts')) return true;
+  if (mime.startsWith('text/') || mime === 'application/json') return true;
+  return false;
+}
+
+async function readAsText(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const r = new FileReader();
+    r.onerror = () => reject(r.error);
+    r.onload = () => resolve(String(r.result ?? ''));
+    r.readAsText(file);
+  });
+}
+
+function onUploadChange(info: { fileList: { uid: string }[] }) {
+  // antd 串行调 beforeUpload 时，先用 fileList.length 设置 total（用户一次选多文件场景）
+  if (info?.fileList?.length && uploadTotal.value === 0) {
+    uploadTotal.value = info.fileList.length;
+    uploadIndex.value = 0;
+  }
+}
+
+async function beforeUpload(file: File): Promise<boolean> {
+  uploadCurrentName.value = file.name;
+  // 单文件场景下 fileList 没事先赋 total，用流式累加
+  if (uploadTotal.value === 0) uploadTotal.value = 1;
+  const mime = file.type || 'application/octet-stream';
+  let content: string | undefined;
+  if (isTextLike(file.name, mime) && file.size <= 2 * 1024 * 1024) {
+    try { content = await readAsText(file); } catch { /* 忽略 */ }
+  }
   attachments.value.push({
     id: genId(), type: 'file',
-    name: file.name, size: file.size, mime: file.type || 'application/octet-stream',
+    name: file.name, size: file.size, mime,
+    content,
     addedAt: new Date().toISOString(),
   });
+  uploadIndex.value += 1;
+  // 全部完成时清状态
+  if (uploadIndex.value >= uploadTotal.value) {
+    setTimeout(() => {
+      if (uploadIndex.value >= uploadTotal.value) {
+        uploadIndex.value = 0;
+        uploadTotal.value = 0;
+        uploadCurrentName.value = '';
+      }
+    }, 600);
+  }
   return false;
 }
 
@@ -86,6 +140,9 @@ function reset() {
   form.goal = 'full_disclosure';
   form.notes = '';
   attachments.value = [];
+  uploadIndex.value = 0;
+  uploadTotal.value = 0;
+  uploadCurrentName.value = '';
 }
 
 async function onOk() {
@@ -140,17 +197,33 @@ function onCancel() {
       <div class="pp-upload-hero">
         <h3 style="margin:0 0 4px 0;font-size:15px">📎 你可以把和创意有关的文档、代码、图像等各种资料都扔到这里</h3>
         <p style="color:#888;font-size:12px;margin:0 0 12px">PDF / Word / 代码 / 图片 / 设计稿都行；越多越好，AI 会自动分析。</p>
-        <a-upload-dragger
-          name="file"
-          :multiple="true"
-          :before-upload="beforeUpload"
-          :show-upload-list="false"
-          accept=".pdf,.doc,.docx,.md,.txt,.png,.jpg,.jpeg,.svg,.json,.py,.js,.ts,.zip,.tar,.gz"
-        >
-          <p class="ant-upload-drag-icon" style="font-size:36px;margin:8px 0">📎</p>
-          <p class="ant-upload-text">点击或拖拽文件到此区域</p>
-          <p class="ant-upload-hint">支持 pdf / doc / docx / md / txt / 图片 / 代码 / 压缩包，可多选</p>
-        </a-upload-dragger>
+        <div class="pp-newproj-upload-wrap">
+          <a-upload-dragger
+            name="file"
+            :multiple="true"
+            :before-upload="beforeUpload"
+            :show-upload-list="false"
+            :disabled="uploading"
+            @change="onUploadChange"
+            accept=".pdf,.doc,.docx,.md,.txt,.png,.jpg,.jpeg,.svg,.json,.py,.js,.ts,.zip,.tar,.gz"
+          >
+            <p class="ant-upload-drag-icon" style="font-size:36px;margin:8px 0">📎</p>
+            <p class="ant-upload-text">点击或拖拽文件到此区域</p>
+            <p class="ant-upload-hint">支持 pdf / doc / docx / md / txt / 图片 / 代码 / 压缩包，可多选</p>
+          </a-upload-dragger>
+          <!-- v0.15-D: 批传进度叠层 -->
+          <div v-if="uploading" class="pp-newproj-progress-overlay">
+            <div class="pp-newproj-progress-card">
+              <div class="pp-newproj-progress-title">
+                添加中 {{ uploadIndex }} / {{ uploadTotal }}
+              </div>
+              <div class="pp-newproj-progress-name" :title="uploadCurrentName">
+                {{ uploadCurrentName || '准备中…' }}
+              </div>
+              <AProgress :percent="uploadPercent" size="small" status="active" />
+            </div>
+          </div>
+        </div>
 
         <a-list v-if="attachmentCount" size="small" bordered :data-source="attachments" style="margin-top:12px">
           <template #renderItem="{ item }: { item: Attachment }">
@@ -221,5 +294,40 @@ function onCancel() {
   border: 1px dashed #c2c8ff;
   border-radius: 8px;
   padding: 16px;
+}
+.pp-newproj-upload-wrap {
+  position: relative;
+}
+.pp-newproj-progress-overlay {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(255, 255, 255, 0.85);
+  border-radius: 4px;
+  z-index: 6;
+}
+.pp-newproj-progress-card {
+  background: #fff;
+  border: 1px solid #e6e6e6;
+  border-radius: 8px;
+  padding: 14px 16px;
+  width: min(85%, 320px);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.08);
+}
+.pp-newproj-progress-title {
+  font-size: 12px;
+  color: #666;
+  font-weight: 600;
+  margin-bottom: 4px;
+}
+.pp-newproj-progress-name {
+  font-size: 13px;
+  color: #1f1f1f;
+  margin-bottom: 8px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 </style>

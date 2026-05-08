@@ -21,11 +21,14 @@ const round = ref(1);
 const isReadonly = computed(() => auth.role === 'admin');
 
 onMounted(async () => {
-  chat.reset();
-  project.value = await projectsApi.get(route.params.id as string);
+  const id = route.params.id as string;
+  // 先尝试从 sessionStorage 恢复；命中跳过后端预填
+  chat.attach(id);
+  const restored = chat.messages.length > 0;
 
-  // demo case 已有 conversation，直接预填
-  if (project.value?.miningSummary?.conversation.length) {
+  project.value = await projectsApi.get(id);
+
+  if (!restored && project.value?.miningSummary?.conversation.length) {
     for (const m of project.value.miningSummary.conversation) {
       if (m.role === 'user') chat.appendUser(m.content);
       else {
@@ -41,7 +44,10 @@ onMounted(async () => {
        ...project.value.miningSummary.effect.map(x => `效果:${x}`),
        ...project.value.miningSummary.differentiator.map(x => `区别:${x}`)],
     );
-    round.value = project.value.miningSummary.conversation.filter(m => m.role === 'agent').length + 1;
+  }
+
+  if (chat.messages.length) {
+    round.value = chat.messages.filter(m => m.role === 'agent').length + 1;
   }
 });
 

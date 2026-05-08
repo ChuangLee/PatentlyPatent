@@ -54,4 +54,37 @@ describe('useChatStore', () => {
     expect(s.streaming).toBe(false);
     expect(s.capturedFields).toEqual([]);
   });
+
+  it('attach 持久化 + 恢复对话历史', () => {
+    sessionStorage.clear();
+    const a = useChatStore();
+    a.attach('p-1');
+    a.appendUser('问题1');
+    a.startAgent();
+    a.appendDelta('回答1');
+    a.endAgent();
+    a.applyFields(['领域:AI']);
+
+    // 模拟刷新：换 pinia 实例从 sessionStorage 恢复
+    setActivePinia(createPinia());
+    const b = useChatStore();
+    b.attach('p-1');
+    expect(b.messages).toHaveLength(2);
+    expect(b.messages[0].content).toBe('问题1');
+    expect(b.messages[1].content).toBe('回答1');
+    expect(b.capturedFields).toEqual(['领域:AI']);
+    expect(b.streaming).toBe(false); // 不持久化 streaming
+  });
+
+  it('attach 不同 projectId 隔离', () => {
+    sessionStorage.clear();
+    const a = useChatStore();
+    a.attach('p-1');
+    a.appendUser('A 项目');
+
+    setActivePinia(createPinia());
+    const b = useChatStore();
+    b.attach('p-2');
+    expect(b.messages).toEqual([]);
+  });
 });

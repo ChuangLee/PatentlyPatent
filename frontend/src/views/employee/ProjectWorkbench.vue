@@ -62,15 +62,18 @@ const currentStep = computed(() =>
 );
 
 onMounted(async () => {
-  chat.reset();
   const id = route.params.id as string;
+  // 先尝试从 sessionStorage 恢复历史对话；命中则跳过后端预填
+  chat.attach(id);
+  const restored = chat.messages.length > 0;
+
   project.value = await projectsApi.get(id);
 
   // 装文件树（store 内部会优先用 sessionStorage 缓存，否则用传入 initialTree，否则建默认树）
   files.attach(id, project.value?.fileTree);
 
-  // 预填已有 conversation
-  if (project.value?.miningSummary?.conversation.length) {
+  if (!restored && project.value?.miningSummary?.conversation.length) {
+    // 首次进入：用后端 miningSummary 预填，attach 内部会 persist
     for (const m of project.value.miningSummary.conversation) {
       if (m.role === 'user') {
         chat.appendUser(m.content);
@@ -89,8 +92,11 @@ onMounted(async () => {
         ...project.value.miningSummary.differentiator.map(x => `区别:${x}`),
       ],
     );
-    round.value =
-      project.value.miningSummary.conversation.filter(m => m.role === 'agent').length + 1;
+  }
+
+  // 推断 round：以已完成 agent 消息数 + 1 为下一轮
+  if (chat.messages.length) {
+    round.value = chat.messages.filter(m => m.role === 'agent').length + 1;
   }
 });
 

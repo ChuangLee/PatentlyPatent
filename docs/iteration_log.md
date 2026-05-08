@@ -190,3 +190,30 @@ title: PatentlyPatent 迭代日志
 - AI 输出文件夹下章节对话历史持久化（目前刷新就丢，store 只存 sessionStorage）
 - search.py 智慧芽超时降级与缓存（当前每次挖掘都打 2 次 API；同 query 套 lru_cache TTL 5min）
 - 报门 modal 上传也接进度条（与 v0.14-B 共用样式）
+
+
+## v0.15 · 2026-05-08 08:55 · chunk 拆分 + chat 持久化 + 智慧芽 TTL 缓存 + 报门进度条
+
+**调研**
+- ROI: A vite chunk 小 / B chat 持久化中 / C 智慧芽 cache 小 / D 报门进度中
+- 发现 admin Dashboard 用 echarts(1MB)、FilePreviewer 已动态 import mammoth；并行派 B+C subagent，自做 A+D
+
+**实现**
+- A. (我做) vite.config.ts 加 manualChunks 拆 echarts / @ant-design/icons-vue / ant-design-vue / mammoth / vue-router+pinia / axios+msw / 其他 vendor；chunkSizeWarningLimit 800；入口 index 从 1.5MB → 5KB
+- B. (subagent) chat store 加 attach(pid)/persist()/load()，key=pp.chat.<pid>；持久化 messages+capturedFields，不持久化 streaming（恢复时强制 false）；appendDelta 不 persist（高频小包）/ endAgent 一次性落盘；ProjectWorkbench+ProjectMining 用 chat.attach 替换 chat.reset，命中缓存跳过 miningSummary 预填；+2 单测（37→39）
+- C. (subagent) zhihuiya.py 加模块级 _cache + _cached_call() 包装；TTL 300s / max 256（满了 pop 最旧）；6 个公开函数都接入；timeout 30s→10s；TimeoutException/ReadTimeout/ConnectError/HTTPStatusError 全降级返空（query_search_count→0；其他→[]/{}），写 logger.warning；降级不写 cache 下次会重试
+- D. (我做) NewProjectModal beforeUpload 改 async：text-like (md/txt/json/py/js/ts/text/*) ≤ 2MB 读 content 注入 attachments；@change 拿 fileList.length 设 total；批传期间叠层 a-progress 卡片（与 v0.14-B 同款样式）；上传中 disabled dragger 防重复点
+
+**测试**
+- pnpm test 39/39（37→39，B 加的 chat 持久化用例）/ pnpm build vue-tsc 严格通过
+- 公网部署 200 ; cache 第二次命中 ~100ms（含 nginx/TLS；本机 17ms 已验证）
+- backend systemctl 重启 lifespan ok / journalctl 看到 zhihuiya cache hit INFO 日志
+
+**chunk 大小对比**
+- 改前：index 1.5MB / Dashboard 1MB（echarts 同捆）→ 改后：index 5KB / vendor-antd 1.2MB / vendor-echarts 1MB / vendor-vue 29KB / vendor-mammoth 56KB（按需加载，且各自浏览器缓存）
+
+**下轮目标 (v0.16)**
+- agent 核心切到 Claude Agent SDK（替换 Anthropic SDK 直调）— mining.py 440 行流水线变 agent + tools loop
+- 子目标：先 spike 一版「单 endpoint /agent/mine 走 SDK」对比当前 mining.py 输出质量
+- vendor-antd 1.2MB 拆按需 import（去掉一些组件全量 import，可能要换 unplugin-vue-components + ant-design-vue/es/xxx）
+- Dashboard echarts 改异步 import（路由进 admin 时才加载）
