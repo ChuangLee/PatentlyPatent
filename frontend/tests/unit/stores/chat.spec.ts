@@ -113,6 +113,37 @@ describe('useChatStore', () => {
     expect(s.messages[0].content).toBe('old');
   });
 
+  // v0.20 Wave1: section 进度
+  it('sectionProgress 初始 5 个 pending；setSectionStatus 切到 running/done', () => {
+    const s = useChatStore();
+    expect(s.sectionProgress.prior_art).toBe('pending');
+    expect(s.sectionProgress.summary).toBe('pending');
+    expect(s.sectionProgress.embodiments).toBe('pending');
+    expect(s.sectionProgress.claims).toBe('pending');
+    expect(s.sectionProgress.drawings_description).toBe('pending');
+
+    s.setSectionStatus('prior_art', 'running');
+    expect(s.sectionProgress.prior_art).toBe('running');
+
+    s.setSectionStatus('prior_art', 'done');
+    expect(s.sectionProgress.prior_art).toBe('done');
+
+    s.resetSectionProgress();
+    expect(s.sectionProgress.prior_art).toBe('pending');
+  });
+
+  // v0.20 Wave1: tool_call 耗时
+  it('attachToolResult 计算 tDurationMs（>=0）', async () => {
+    const s = useChatStore();
+    s.appendToolCall('search_patents', { kw: 'AI' });
+    expect(s.messages[0].tool?.t0).toBeTypeOf('number');
+    // 强制 tick 一下时间
+    await new Promise(r => setTimeout(r, 5));
+    s.attachToolResult('ok');
+    expect(s.messages[0].tool?.tDurationMs).toBeTypeOf('number');
+    expect(s.messages[0].tool!.tDurationMs!).toBeGreaterThanOrEqual(0);
+  });
+
   it('attach 不同 projectId 隔离', () => {
     sessionStorage.clear();
     const a = useChatStore();

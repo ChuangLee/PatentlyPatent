@@ -53,6 +53,8 @@ export interface ChatMessage {
     id?: string;
     result?: string;
     data?: unknown;
+    t0?: number;            // v0.20: 开始时间 (Date.now() ms)
+    tDurationMs?: number;   // v0.20: 工具耗时 (ms)
   };
   meta?: {
     stage?: '5why' | 'whatif' | 'generalize' | 'effect';

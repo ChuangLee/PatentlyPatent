@@ -61,6 +61,32 @@ const currentStep = computed(() =>
   project.value ? STATUS_STEP[project.value.status] : 0,
 );
 
+// v0.20 Wave1 任务 1: 5 章节进度条配置
+const SECTION_STEPS = [
+  { key: 'prior_art', title: '现有技术' },
+  { key: 'summary', title: '发明内容' },
+  { key: 'embodiments', title: '实施例' },
+  { key: 'claims', title: '权利要求' },
+  { key: 'drawings_description', title: '附图' },
+] as const;
+
+/** a-step status: 'wait' | 'process' | 'finish' | 'error' */
+function stepStatus(key: string): 'wait' | 'process' | 'finish' | 'error' {
+  const s = chat.sectionProgress[key];
+  if (s === 'running') return 'process';
+  if (s === 'done') return 'finish';
+  if (s === 'error') return 'error';
+  return 'wait';
+}
+
+/** 用于 a-steps current（取第一条 running 章节，否则取已完成数） */
+const sectionCurrentIdx = computed(() => {
+  const runningIdx = SECTION_STEPS.findIndex(s => chat.sectionProgress[s.key] === 'running');
+  if (runningIdx >= 0) return runningIdx;
+  const done = SECTION_STEPS.filter(s => chat.sectionProgress[s.key] === 'done').length;
+  return done;
+});
+
 onMounted(async () => {
   const id = route.params.id as string;
   // 先尝试从 sessionStorage 恢复历史对话；命中则跳过后端预填
@@ -143,6 +169,20 @@ function onRoundComplete() {
         <a-step title="检索" />
         <a-step title="撰写" />
         <a-step title="完成" />
+      </a-steps>
+      <!-- v0.20 Wave1 任务 1: 5 章节并行进度（仅 agent_sdk 模式显示） -->
+      <a-steps
+        v-if="ui.agentMode === 'agent_sdk'"
+        :current="sectionCurrentIdx"
+        size="small"
+        style="margin-top:12px"
+      >
+        <a-step
+          v-for="s in SECTION_STEPS"
+          :key="s.key"
+          :title="s.title"
+          :status="stepStatus(s.key)"
+        />
       </a-steps>
     </template>
   </a-page-header>

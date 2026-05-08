@@ -52,6 +52,13 @@ class Settings(BaseModel):
     agent_claims: bool = os.environ.get("PP_AGENT_CLAIMS", "").lower() in (
         "1", "true", "yes",
     )
+    # v0.20 Wave1：drawings_description / summary 章节是否走 agent 智能版
+    agent_drawings: bool = os.environ.get("PP_AGENT_DRAWINGS", "").lower() in (
+        "1", "true", "yes",
+    )
+    agent_summary: bool = os.environ.get("PP_AGENT_SUMMARY", "").lower() in (
+        "1", "true", "yes",
+    )
 
     # 智慧芽
     zhihuiya_token: str = os.environ.get("ZHIHUIYA_TOKEN", "")

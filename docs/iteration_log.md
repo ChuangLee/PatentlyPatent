@@ -378,3 +378,48 @@ title: PatentlyPatent 迭代日志
 - admin Dashboard 加 agent_runs 列表视图（time series 图 / fallback 趋势 / cost 累计）
 - 把 mining.py 余下 sections（drawings_description / summary）也做 smart 版，凑齐 5 节
 - agent prior_art 用 prompt cache（Anthropic prompt caching）— SDK 怎么开 cache 调研
+
+
+## v0.20 · 2026-05-08 14:15 · 12 件并行 — 5 节 smart 凑齐 + agent_runs Dashboard + mine_full + 工作台 timeline + 错误兜底
+
+**A 后端 mining 完善（subagent）— 3 件**
+- A1. drawings_description smart 版（`07-附图说明.md`）prompt: "3-5 张关键附图(数据流/架构/时序/状态/部署)，每张图号+标题+≤40字"，env PP_AGENT_DRAWINGS
+- A2. summary smart 版（`03-发明内容.md`）prompt: "3 段讲清 技术问题→核心方案→关键效果，每段≤80 字，量化优先"，env PP_AGENT_SUMMARY
+- A3. zhihuiya 错误兜底加 4 场景：query 非 str / 空串 / >500 字符 / 黑名单关键字（DROP TABLE 等 SQL 注入）；每次降级写 INFO 日志含 query[:50]+原因；7 个 tool 显式 except ZhihuiyaError 走 _safe_tool_error 不冒泡 SDK turn
+
+**B 后端 agent + observability + cache（subagent + 补救）— 3 件**
+- B1. ab_compare 写日志补 num_turns/total_cost_usd/stop_reason：mine_section_via_agent done event 透传 + finally 块从 done_meta 取
+- B2. /api/agent/mine_full/{project_id}：单端点端到端跑 5 节，SSE 流 section_start → 中间事件透传 → section_done(file_id) ×5 + 总 done(total_cost_usd/total_turns/sections_completed)，落盘 .ai-internal/_compare/full/<sect>.md；写 AgentRunLog endpoint='mine_full'
+- B3. prompt cache 调研：claude-agent-sdk 0.1.77 system_prompt 类型仅 str|SystemPromptPreset|SystemPromptFile，不支持 list[ContentBlock]/cache_control 手注入；唯一杠杆是 SystemPromptPreset.exclude_dynamic_sections=True；写 docs/prompt_cache_research.md 63 行
+
+**C 前端 admin 监控视图（subagent）— 3 件**
+- C1. agent_runs a-table：9 列 (时间/endpoint/idea/turns/cost/duration/stop_reason/fallback/mock) + 行展开 idea 全文 + endpoint segmented 过滤 + onlyFallback checkbox + limit input-number + 🔄 刷新；relativeTime "3 分钟前"
+- C2. echarts cost 时序图：line smooth 按 endpoint 分系列(6 色)；fallback markPoint 红 / mock markPoint 灰；240px
+- C3. echarts fallback 率分组柱图：stacked bar，ok 绿 / fallback 橙 / error 红，按 endpoint 分组
+
+**D 前端工作台增强（subagent）— 3 件**
+- D1. 5 步 timeline a-steps（现有技术/发明内容/实施例/权利要求/附图）；store sectionProgress + setSectionStatus；agentMode='agent_sdk' 时显示
+- D2. tool 卡片显示耗时：ChatMessage.tool 加 t0/tDurationMs；attachToolResult 算 diff；模板⏱{ms}+a-spin 运行中
+- D3. file 事件时第一次自动开 split view：splitAutoOpened 防抖 ref，整个组件生命周期只触发一次
+
+**测试**
+- pnpm test 44/44（42→44）/ pnpm build vue-tsc 通
+- 公网 mine_full e2e: 15 个 SSE 事件（section_start + thinking + 2×tool + 8×delta + done）
+- agent_runs 真 num_turns/cost 数据落库：mine_full row id=11 num_turns=15 / ab_compare row id=10 num_turns=3 cost=0.0(mock)
+- 老路径 auto-mining 33345 字节 200，零回归
+
+**v0.20 共完成 12 件需求**
+
+**下轮目标 (v0.21) — 收尾原型**
+- 真 LLM 切到生产（PP_MOCK_LLM=0 或确保 use_agent_sdk_real 全程真路径）
+- 报门 → 工作台 → 5 节 mine_full 一键跑 → 导出 docx 全流程 e2e（含真智慧芽真 LLM）
+- 用户认证：fake auth → JWT（多用户隔离）
+- SSE 流并发限流（防 1 个 agent 占满 4 核）
+- cost 累计预算告警（>$10/day 邮件/通知）
+- prompt cache 用 SystemPromptPreset.exclude_dynamic_sections=True 实测
+- 加测 e2e: pytest backend/test_e2e_full.py 串起 报门→mine_full→docx export
+- 用户使用手册 docs/user_guide.md
+- 部署运维手册 docs/deploy_runbook.md
+- 性能基线测试：5 并发用户 × N 次挖掘的吞吐 + 每分钟 cost
+- 错误监控 dashboard：admin Dashboard 加 error 时间序列图
+- 文件树 a-tree 滚动到新 spawn 文件位置

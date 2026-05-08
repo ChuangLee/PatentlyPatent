@@ -22,6 +22,7 @@ from sqlalchemy.orm import Session
 from sse_starlette.sse import EventSourceResponse
 
 from ..agent_sdk_spike import agent_mine_stream
+from .. import agent_section_demo
 from ..agent_section_demo import mine_section_via_agent
 from ..config import settings
 from ..db import SessionLocal, get_db
@@ -160,6 +161,8 @@ async def _run_agent_prior_art(
     tool_calls = 0
     err: str | None = None
 
+    done_meta: dict = {}
+
     async def _run() -> None:
         nonlocal tool_calls, err
         async for ev in mine_section_via_agent(
@@ -189,6 +192,11 @@ async def _run_agent_prior_art(
                 tool_lines.append(f"- *thinking*: {ev.get('text','')}")
             elif etype == "error":
                 err = ev.get("message", "?")
+            elif etype == "done":
+                # v0.20: 抓 done event meta 给 ab_compare 写日志用
+                done_meta["num_turns"] = ev.get("num_turns")
+                done_meta["total_cost_usd"] = ev.get("total_cost_usd")
+                done_meta["stop_reason"] = ev.get("stop_reason")
 
     await asyncio.wait_for(_run(), timeout=timeout)
 
@@ -204,7 +212,14 @@ async def _run_agent_prior_art(
         else ""
     )
     md = header + body + trace
-    return md, {"tool_calls": tool_calls, "error": err, "deltas_chars": len(body)}
+    return md, {
+        "tool_calls": tool_calls,
+        "error": err,
+        "deltas_chars": len(body),
+        "num_turns": done_meta.get("num_turns"),
+        "total_cost_usd": done_meta.get("total_cost_usd"),
+        "stop_reason": done_meta.get("stop_reason"),
+    }
 
 
 @router.post("/ab_compare/{project_id}")
@@ -246,14 +261,15 @@ async def ab_compare(
         try:
             _ab_log_db = SessionLocal()
             try:
+                _stop_reason = agent_meta.get("stop_reason")
                 _ab_log_db.add(AgentRunLog(
                     endpoint="ab_compare",
                     project_id=project_id,
                     idea=(idea or "")[:4000],
-                    num_turns=None,
-                    total_cost_usd=None,
+                    num_turns=agent_meta.get("num_turns"),
+                    total_cost_usd=agent_meta.get("total_cost_usd"),
                     duration_ms=int((time.monotonic() - t_agent) * 1000),
-                    stop_reason=None,
+                    stop_reason=(_stop_reason or None) and str(_stop_reason)[:32],
                     fallback_used=False,
                     error=(agent_error or None) and str(agent_error)[:2000],
                     is_mock=not settings.use_agent_sdk_real,
@@ -304,3 +320,229 @@ async def ab_compare(
         "agent_md": agent_md,
         "summary": summary,
     }
+
+
+# ─── v0.20: /mine_full/{project_id} —— 一次跑全 5 节，SSE 流式 ────────────────
+
+
+_DEFAULT_FULL_SECTIONS = [
+    "prior_art",
+    "summary",
+    "embodiments",
+    "claims",
+    "drawings_description",
+]
+
+
+class MineFullRequest(BaseModel):
+    idea: str
+    sections: list[str] | None = None
+
+
+def _get_or_create_full_folder(db: Session, pid: str) -> str:
+    """找/建 .ai-internal/_compare/full/ 文件夹，返回 folder id。"""
+    compare_id = _get_or_create_compare_folder(db, pid)
+    full = (
+        db.query(FileNode)
+        .filter(
+            FileNode.project_id == pid,
+            FileNode.parent_id == compare_id,
+            FileNode.kind == "folder",
+            FileNode.name == "full",
+        )
+        .first()
+    )
+    if full is None:
+        full = FileNode(
+            id=f"d-{uuid.uuid4().hex[:10]}",
+            project_id=pid,
+            name="full",
+            kind="folder",
+            parent_id=compare_id,
+            source="ai",
+            hidden=True,
+        )
+        db.add(full)
+        db.flush()
+        db.commit()
+    return full.id
+
+
+def _write_full_section(pid: str, sect: str, md: str) -> str:
+    """短事务：写 .ai-internal/_compare/full/<sect>.md，返 file_id。"""
+    db = SessionLocal()
+    try:
+        folder_id = _get_or_create_full_folder(db, pid)
+        name = f"{sect}.md"
+        existing = (
+            db.query(FileNode)
+            .filter(
+                FileNode.project_id == pid,
+                FileNode.parent_id == folder_id,
+                FileNode.name == name,
+            )
+            .first()
+        )
+        if existing is not None:
+            db.delete(existing)
+            db.flush()
+        fid = f"f-{uuid.uuid4().hex[:10]}"
+        node = FileNode(
+            id=fid,
+            project_id=pid,
+            name=name,
+            kind="file",
+            parent_id=folder_id,
+            source="ai",
+            hidden=True,
+            mime="text/markdown",
+            content=md,
+            size=len(md.encode("utf-8")) if md else 0,
+        )
+        db.add(node)
+        db.commit()
+        return fid
+    except Exception:
+        db.rollback()
+        raise
+    finally:
+        db.close()
+
+
+def _write_run_log_sync(
+    *,
+    endpoint: str,
+    project_id: str | None,
+    idea: str | None,
+    num_turns: int | None,
+    total_cost_usd: float | None,
+    duration_ms: int,
+    stop_reason: str | None,
+    fallback_used: bool,
+    error: str | None,
+    is_mock: bool,
+) -> None:
+    db = SessionLocal()
+    try:
+        row = AgentRunLog(
+            endpoint=endpoint,
+            project_id=project_id,
+            idea=(idea or "")[:4000],
+            num_turns=num_turns,
+            total_cost_usd=total_cost_usd,
+            duration_ms=duration_ms,
+            stop_reason=(stop_reason or None) and str(stop_reason)[:32],
+            fallback_used=bool(fallback_used),
+            error=(error or None) and str(error)[:2000],
+            is_mock=bool(is_mock),
+        )
+        db.add(row)
+        db.commit()
+    except Exception:
+        db.rollback()
+        raise
+    finally:
+        db.close()
+
+
+@router.post("/mine_full/{project_id}")
+async def mine_full(
+    project_id: str, body: MineFullRequest, db: Session = Depends(get_db),
+):
+    sections = body.sections or list(_DEFAULT_FULL_SECTIONS)
+    p = db.get(Project, project_id)
+    if not p:
+        raise HTTPException(404, "project not found")
+
+    idea_text = (body.idea or p.description or "").strip()
+    if not idea_text:
+        raise HTTPException(400, "idea 为空且 project.description 也为空")
+
+    title = p.title or "未命名项目"
+    domain_label = p.custom_domain or _DOMAIN_LABEL.get(p.domain or "", p.domain or "其他")
+
+    async def gen():
+        t0 = time.monotonic()
+        total_cost = 0.0
+        total_turns = 0
+        sections_done: list[str] = []
+        last_error: str | None = None
+        try:
+            for sect in sections:
+                yield {
+                    "event": "section_start",
+                    "data": json.dumps(
+                        {"type": "section_start", "name": sect}, ensure_ascii=False,
+                    ),
+                }
+                sect_md_parts: list[str] = []
+                async for ev in agent_section_demo.mine_section_via_agent(
+                    sect,
+                    {
+                        "idea_text": idea_text,
+                        "title": title,
+                        "domain": domain_label,
+                        "project_id": project_id,
+                    },
+                ):
+                    yield {
+                        "event": ev.get("type", "message"),
+                        "data": json.dumps(ev, ensure_ascii=False),
+                    }
+                    etype = ev.get("type")
+                    if etype == "delta":
+                        sect_md_parts.append(ev.get("text", ""))
+                    elif etype == "done":
+                        if ev.get("total_cost_usd"):
+                            total_cost += float(ev["total_cost_usd"])
+                        if ev.get("num_turns"):
+                            total_turns += int(ev["num_turns"])
+                    elif etype == "error":
+                        last_error = ev.get("message")
+                file_id = await asyncio.to_thread(
+                    _write_full_section, project_id, sect, "".join(sect_md_parts),
+                )
+                sections_done.append(sect)
+                yield {
+                    "event": "section_done",
+                    "data": json.dumps(
+                        {
+                            "type": "section_done",
+                            "name": sect,
+                            "file_id": file_id,
+                        },
+                        ensure_ascii=False,
+                    ),
+                }
+            yield {
+                "event": "done",
+                "data": json.dumps(
+                    {
+                        "type": "done",
+                        "total_cost_usd": total_cost,
+                        "total_turns": total_turns,
+                        "sections_completed": sections_done,
+                    },
+                    ensure_ascii=False,
+                ),
+            }
+        finally:
+            duration_ms = int((time.monotonic() - t0) * 1000)
+            try:
+                await asyncio.to_thread(
+                    _write_run_log_sync,
+                    endpoint="mine_full",
+                    project_id=project_id,
+                    idea=idea_text[:200],
+                    num_turns=total_turns or None,
+                    total_cost_usd=total_cost or None,
+                    duration_ms=duration_ms,
+                    stop_reason="completed" if not last_error else "error",
+                    fallback_used=False,
+                    error=last_error,
+                    is_mock=not settings.use_agent_sdk_real,
+                )
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("mine_full agent_run_log write failed: %s", exc)
+
+    return EventSourceResponse(gen())

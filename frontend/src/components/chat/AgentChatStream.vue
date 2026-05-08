@@ -10,6 +10,7 @@ import Input from 'ant-design-vue/es/input';
 import Segmented from 'ant-design-vue/es/segmented';
 import Tag from 'ant-design-vue/es/tag';
 import Collapse from 'ant-design-vue/es/collapse';
+import Spin from 'ant-design-vue/es/spin';
 
 const CollapsePanel = Collapse.Panel;
 
@@ -27,12 +28,26 @@ const auth = useAuthStore();
 const input = ref('');
 const containerRef = ref<HTMLElement | null>(null);
 let currentAbort: AbortController | null = null;
+// v0.20 Wave1 任务 3: 防抖 ref——只在第一次 file 事件时自动开 split view
+const splitAutoOpened = ref(false);
 
 function cancelStream() {
   if (currentAbort) {
     currentAbort.abort();
     currentAbort = null;
     chat.endAgent();
+  }
+}
+
+/**
+ * v0.20 Wave1 任务 3: 收到第一条 file 事件且 split view 关着时自动开。
+ * 用 splitAutoOpened ref 防抖，整个组件生命周期只触发一次。
+ */
+function autoOpenSplitOnFirstFile() {
+  if (splitAutoOpened.value) return;
+  splitAutoOpened.value = true;
+  if (!ui.workbenchSplitView) {
+    ui.toggleWorkbenchSplitView();
   }
 }
 
@@ -66,6 +81,7 @@ async function send() {
           files.pushNode(e.node);
         }
         files.selectFile(e.node.id);
+        autoOpenSplitOnFirstFile();
       } else if (e.type === 'done') {
         chat.endAgent();
       }
@@ -78,6 +94,8 @@ async function send() {
 /** 由父组件（ProjectWorkbench）调，进入工作台时自动跑挖掘流程 */
 async function autoMine(ctx: Parameters<typeof chatApi.autoMine>[1]) {
   if (chat.streaming) return;
+  // v0.20 Wave1: 新一轮挖掘前复位 section 进度
+  chat.resetSectionProgress();
   chat.startAgent();
   currentAbort = new AbortController();
   const useAgentSdk = ui.agentMode === 'agent_sdk';
@@ -93,6 +111,19 @@ async function autoMine(ctx: Parameters<typeof chatApi.autoMine>[1]) {
         if (existing) Object.assign(existing, e.node);
         else files.pushNode(e.node);
         files.selectFile(e.node.id);
+        autoOpenSplitOnFirstFile();
+      }
+      // v0.20 Wave1 任务 1: section_start / section_done 由后端 mine_full SSE 推送
+      // 注意：这些事件类型未在 ChatStreamEvent union 中声明，但 SSE handler 会透传。
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      else if ((e as any).type === 'section_start' && (e as any).section) {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        chat.setSectionStatus((e as any).section, 'running');
+      }
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      else if ((e as any).type === 'section_done' && (e as any).section) {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        chat.setSectionStatus((e as any).section, 'done');
       }
       else if (e.type === 'done') chat.endAgent();
     };
@@ -145,7 +176,11 @@ defineExpose({ autoMine });
                       border-radius:8px;padding:8px 10px;font-size:12px">
             <div style="display:flex;align-items:center;gap:6px;margin-bottom:4px">
               <Tag color="processing" style="margin:0">🔧 {{ m.tool.name }}</Tag>
-              <span v-if="m.tool.result == null" style="color:#1677ff;font-size:11px">运行中…</span>
+              <span v-if="m.tool.tDurationMs != null" class="pp-tool-time">⏱ {{ m.tool.tDurationMs }}ms</span>
+              <span v-if="m.tool.result == null" style="color:#1677ff;font-size:11px;display:inline-flex;align-items:center;gap:4px">
+                <Spin size="small" />
+                运行中…
+              </span>
               <span v-else style="color:#52c41a;font-size:11px">✓ 完成</span>
             </div>
             <Collapse :bordered="false" ghost size="small">
@@ -201,3 +236,12 @@ defineExpose({ autoMine });
     </div>
   </div>
 </template>
+
+<style scoped>
+/* v0.20 Wave1 任务 2: tool_call 耗时小字 */
+.pp-tool-time {
+  color: #bfbfbf;
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+</style>

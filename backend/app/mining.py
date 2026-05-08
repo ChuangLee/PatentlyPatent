@@ -459,6 +459,123 @@ def _build_embodiments_section_dispatch(
     return _run_coro_blocking(coro)
 
 
+def build_drawings_description_section_legacy(title: str, domain: str) -> dict:
+    """v0.20 Wave1：07-附图说明.md（drawings_description）老路径构造。
+
+    legacy 给一份"建议补充"模板：5 张图占位 + 注入位，markdown 字面量稳定。
+    """
+    return {
+        "name": "07-附图说明.md", "phase": "auto",
+        "content": f"""# 七、附图说明
+
+> **PGTree 节点目标**：列出本案关键附图（3-5 张），每张图配 1 句说明。
+> 当前阶段：领域 = {domain}，标题 = 《{title}》。
+> 心法：图号要与说明书正文一致；不要凭空新增没有出现在实施例里的图。
+
+## 7.1 附图清单
+
+| 图号 | 标题 | 说明（≤40 字） |
+|---|---|---|
+| 图 1 | {_inject("fig1_title", "建议给「系统架构图」起一个具体名字")} | {_inject("fig1_desc", "1 句话说明此图覆盖的模块/数据流")} |
+| 图 2 | {_inject("fig2_title", "建议给「数据流图」起名")} | {_inject("fig2_desc", "1 句话说明输入→处理→输出")} |
+| 图 3 | {_inject("fig3_title", "建议给「时序图」起名")} | {_inject("fig3_desc", "1 句话说明时序协作")} |
+| 图 4 | {_inject("fig4_title", "可选：状态图 / 部署图")} | {_inject("fig4_desc", "1 句话说明")} |
+| 图 5 | {_inject("fig5_title", "可选：关键算法流程图")} | {_inject("fig5_desc", "1 句话说明")} |
+
+## 7.2 资料来源提示
+- 若你已上传架构图到左侧"我的资料/"，AI 会自动引用并替换上面的注入位。
+- 若尚未上传，建议至少补充：**1 张系统架构图** + **1 张关键时序图**。
+
+---
+{_examiner_checklist("附图说明")}
+""",
+    }
+
+
+def build_summary_section_legacy(title: str, domain: str, desc_safe: str) -> dict:
+    """v0.20 Wave1：03-发明内容.md（summary）老路径构造。
+
+    与 03-技术问题.md 不冲突（发明内容是 CN 说明书的「概述」节）。
+    """
+    return {
+        "name": "03-发明内容.md", "phase": "auto",
+        "content": f"""# 三、发明内容（概述）
+
+> **PGTree 节点目标**：3 段话讲清——技术问题 → 核心方案 → 关键效果。
+> 每段 ≤80 字；本节是说明书的"电梯演讲"。
+
+## 3.1 技术问题（针对哪个 baseline 的哪个缺陷）
+{_inject("summary_problem", "1 段话，≤80 字；明确 baseline + 根因层缺陷")}
+
+## 3.2 核心方案（动词开头的手段 + 1-2 个关键模块）
+{_inject("summary_scheme", "1 段话，≤80 字；动词开头，含核心手段名与 1-2 个关键模块")}
+
+## 3.3 关键效果（量化数字优先于形容词）
+{_inject("summary_effect", "1 段话，≤80 字；优先用量化数字（如 2.3× / -38%）")}
+
+> 报门描述回扣（领域 = {domain}）：
+> > {desc_safe}
+
+---
+{_examiner_checklist("发明内容")}
+""",
+    }
+
+
+def _build_drawings_description_section_dispatch(
+    *,
+    title: str,
+    domain: str,
+    desc_safe: str,
+    project_id: str | None,
+) -> dict:
+    """同步入口：env PP_AGENT_DRAWINGS / settings.agent_drawings 切换。"""
+    from .config import settings
+
+    legacy_factory = lambda: build_drawings_description_section_legacy(title, domain)
+    if not settings.agent_drawings:
+        return legacy_factory()
+
+    idea_text = desc_safe if desc_safe and "未填写描述" not in desc_safe else title
+    coro = _build_section_smart_via_agent(
+        "drawings_description",
+        "07-附图说明.md",
+        legacy_factory,
+        idea_text=idea_text,
+        title=title,
+        domain=domain,
+        project_id=project_id,
+    )
+    return _run_coro_blocking(coro)
+
+
+def _build_summary_section_dispatch(
+    *,
+    title: str,
+    domain: str,
+    desc_safe: str,
+    project_id: str | None,
+) -> dict:
+    """同步入口：env PP_AGENT_SUMMARY / settings.agent_summary 切换。"""
+    from .config import settings
+
+    legacy_factory = lambda: build_summary_section_legacy(title, domain, desc_safe)
+    if not settings.agent_summary:
+        return legacy_factory()
+
+    idea_text = desc_safe if desc_safe and "未填写描述" not in desc_safe else title
+    coro = _build_section_smart_via_agent(
+        "summary",
+        "03-发明内容.md",
+        legacy_factory,
+        idea_text=idea_text,
+        title=title,
+        domain=domain,
+        project_id=project_id,
+    )
+    return _run_coro_blocking(coro)
+
+
 def _build_claims_section_dispatch(
     *,
     title: str,

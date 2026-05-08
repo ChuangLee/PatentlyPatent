@@ -25,8 +25,25 @@ from typing import Any, AsyncIterator
 
 from .config import settings
 from . import zhihuiya
+from .zhihuiya import ZhihuiyaError
 
 logger = logging.getLogger(__name__)
+
+
+def _safe_tool_error(label: str, exc: Exception, q: str | None = None) -> dict:
+    """v0.20 Wave1：tool 内统一兜底返回，绝不冒泡 SDK 让 turn 失败。
+
+    分支：
+      - ZhihuiyaError：业务/降级失败，给 LLM 一段简明提示
+      - 其它 Exception：吞掉异常细节，回 isError=True
+    """
+    if isinstance(exc, ZhihuiyaError):
+        msg = f"{label} 智慧芽业务失败（已降级），原因：{exc}"
+    else:
+        msg = f"{label} 失败：{type(exc).__name__}: {exc}"
+    qpreview = (q or "").strip().replace("\n", " ")[:50]
+    logger.warning("tool %s err q='%s' %s", label, qpreview, msg)
+    return {"content": [{"type": "text", "text": msg}], "isError": True}
 
 
 def log_startup_status() -> None:
@@ -79,12 +96,10 @@ def _build_mcp_server():
             return {"content": [{"type": "text", "text": "query 为空"}], "isError": True}
         try:
             count = await zhihuiya.query_search_count(q)
+        except ZhihuiyaError as exc:
+            return _safe_tool_error("search_patents", exc, q)
         except Exception as exc:  # noqa: BLE001
-            logger.warning("search_patents tool failed: %s", exc)
-            return {
-                "content": [{"type": "text", "text": f"检索失败：{exc}"}],
-                "isError": True,
-            }
+            return _safe_tool_error("search_patents", exc, q)
         return {
             "content": [
                 {"type": "text", "text": f'检索式 "{q}" 命中 {count} 件'},
@@ -103,12 +118,10 @@ def _build_mcp_server():
             return {"content": [{"type": "text", "text": "query 为空"}], "isError": True}
         try:
             data = await zhihuiya.patent_trends(q, lang=lang)
+        except ZhihuiyaError as exc:
+            return _safe_tool_error("search_trends", exc, q)
         except Exception as exc:  # noqa: BLE001
-            logger.warning("search_trends tool failed: %s", exc)
-            return {
-                "content": [{"type": "text", "text": f"趋势查询失败：{exc}"}],
-                "isError": True,
-            }
+            return _safe_tool_error("search_trends", exc, q)
         # 截到最近 10 年
         trimmed = data[-10:] if isinstance(data, list) else []
         text = json.dumps(trimmed, ensure_ascii=False)
@@ -129,12 +142,10 @@ def _build_mcp_server():
             return {"content": [{"type": "text", "text": "query 为空"}], "isError": True}
         try:
             raw = await zhihuiya.applicant_ranking(q, lang=lang, n=10)
+        except ZhihuiyaError as exc:
+            return _safe_tool_error("search_applicants", exc, q)
         except Exception as exc:  # noqa: BLE001
-            logger.warning("search_applicants tool failed: %s", exc)
-            return {
-                "content": [{"type": "text", "text": f"申请人查询失败：{exc}"}],
-                "isError": True,
-            }
+            return _safe_tool_error("search_applicants", exc, q)
         # 字段归一：智慧芽不同接口字段名不一，尽量兜底
         normalized: list[dict] = []
         for item in (raw or [])[:10]:
@@ -171,12 +182,17 @@ def _build_mcp_server():
         {"project_id": str, "name": str, "content": str, "parent_folder": str},
     )
     async def file_write_section(args: dict[str, Any]) -> dict:
-        return await _do_file_write_section(
-            project_id=(args or {}).get("project_id", ""),
-            name=(args or {}).get("name", ""),
-            content=(args or {}).get("content", ""),
-            parent_folder=(args or {}).get("parent_folder") or "AI 输出",
-        )
+        try:
+            return await _do_file_write_section(
+                project_id=(args or {}).get("project_id", ""),
+                name=(args or {}).get("name", ""),
+                content=(args or {}).get("content", ""),
+                parent_folder=(args or {}).get("parent_folder") or "AI 输出",
+            )
+        except ZhihuiyaError as exc:
+            return _safe_tool_error("file_write_section", exc)
+        except Exception as exc:  # noqa: BLE001
+            return _safe_tool_error("file_write_section", exc)
 
     @tool(
         "legal_status",
@@ -192,12 +208,10 @@ def _build_mcp_server():
             return {"content": [{"type": "text", "text": "query 为空"}], "isError": True}
         try:
             data = await zhihuiya.simple_legal_status(q)
+        except ZhihuiyaError as exc:
+            return _safe_tool_error("legal_status", exc, q)
         except Exception as exc:  # noqa: BLE001
-            logger.warning("legal_status tool failed: %s", exc)
-            return {
-                "content": [{"type": "text", "text": f"法律状态查询失败：{exc}"}],
-                "isError": True,
-            }
+            return _safe_tool_error("legal_status", exc, q)
         text = _format_legal_status(q, data)
         return {
             "content": [{"type": "text", "text": text}],
@@ -216,12 +230,10 @@ def _build_mcp_server():
             return {"content": [{"type": "text", "text": "query 为空"}], "isError": True}
         try:
             raw = await zhihuiya.inventor_ranking(q, lang=lang, n=10)
+        except ZhihuiyaError as exc:
+            return _safe_tool_error("inventor_ranking", exc, q)
         except Exception as exc:  # noqa: BLE001
-            logger.warning("inventor_ranking tool failed: %s", exc)
-            return {
-                "content": [{"type": "text", "text": f"发明人查询失败：{exc}"}],
-                "isError": True,
-            }
+            return _safe_tool_error("inventor_ranking", exc, q)
         normalized = _normalize_inventor_list(raw)
         text = json.dumps(normalized, ensure_ascii=False)
         return {
@@ -239,10 +251,15 @@ def _build_mcp_server():
         {"project_id": str, "keyword": str},
     )
     async def file_search_in_project(args: dict[str, Any]) -> dict:
-        return await _do_file_search_in_project(
-            project_id=(args or {}).get("project_id", ""),
-            keyword=(args or {}).get("keyword", ""),
-        )
+        try:
+            return await _do_file_search_in_project(
+                project_id=(args or {}).get("project_id", ""),
+                keyword=(args or {}).get("keyword", ""),
+            )
+        except ZhihuiyaError as exc:
+            return _safe_tool_error("file_search_in_project", exc)
+        except Exception as exc:  # noqa: BLE001
+            return _safe_tool_error("file_search_in_project", exc)
 
     server = create_sdk_mcp_server(
         name="patent-tools",

@@ -9,11 +9,25 @@ interface PersistShape {
   capturedFields: string[];
 }
 
+// v0.20 Wave1: 5 个章节的进度状态
+export type SectionKey = 'prior_art' | 'summary' | 'embodiments' | 'claims' | 'drawings_description';
+export type SectionStatus = 'pending' | 'running' | 'done' | 'error';
+
+const DEFAULT_SECTION_PROGRESS: Record<SectionKey, SectionStatus> = {
+  prior_art: 'pending',
+  summary: 'pending',
+  embodiments: 'pending',
+  claims: 'pending',
+  drawings_description: 'pending',
+};
+
 export const useChatStore = defineStore('chat', () => {
   const projectId = ref<string | null>(null);
   const messages = ref<ChatMessage[]>([]);
   const streaming = ref(false);
   const capturedFields = ref<string[]>([]);
+  // v0.20 Wave1: section 进度（不持久化，每次 attach 复位）
+  const sectionProgress = ref<Record<string, SectionStatus>>({ ...DEFAULT_SECTION_PROGRESS });
 
   function persist() {
     if (!projectId.value) return;
@@ -51,6 +65,18 @@ export const useChatStore = defineStore('chat', () => {
       capturedFields.value = [];
     }
     streaming.value = false;
+    // section 进度每次 attach 复位
+    sectionProgress.value = { ...DEFAULT_SECTION_PROGRESS };
+  }
+
+  /** v0.20 Wave1: 设置某个 section 的状态 */
+  function setSectionStatus(key: string, status: SectionStatus) {
+    sectionProgress.value = { ...sectionProgress.value, [key]: status };
+  }
+
+  /** v0.20 Wave1: 复位 section 进度（开新一轮挖掘前调） */
+  function resetSectionProgress() {
+    sectionProgress.value = { ...DEFAULT_SECTION_PROGRESS };
   }
 
   function appendUser(content: string) {
@@ -89,7 +115,7 @@ export const useChatStore = defineStore('chat', () => {
     }
   }
 
-  /** v0.18-C: 推一条结构化 tool_call 消息 */
+  /** v0.18-C: 推一条结构化 tool_call 消息（v0.20: 记 t0 用于耗时计算） */
   function appendToolCall(name: string, input: unknown, id?: string) {
     messages.value.push({
       id: `m-${Date.now()}-tc-${Math.random().toString(36).slice(2, 6)}`,
@@ -97,18 +123,19 @@ export const useChatStore = defineStore('chat', () => {
       content: '',
       ts: new Date().toISOString(),
       type: 'tool_call',
-      tool: { name, input, id },
+      tool: { name, input, id, t0: Date.now() },
     });
     persist();
   }
 
-  /** v0.18-C: 把 tool_result 挂到最近一条无 result 的 tool_call 上 */
+  /** v0.18-C: 把 tool_result 挂到最近一条无 result 的 tool_call 上（v0.20: 算 tDurationMs） */
   function attachToolResult(text: string, data?: unknown) {
     for (let i = messages.value.length - 1; i >= 0; i--) {
       const m = messages.value[i];
       if (m.type === 'tool_call' && m.tool && m.tool.result == null) {
         m.tool.result = text;
         if (data !== undefined) m.tool.data = data;
+        if (m.tool.t0 != null) m.tool.tDurationMs = Date.now() - m.tool.t0;
         persist();
         return;
       }
@@ -154,6 +181,7 @@ export const useChatStore = defineStore('chat', () => {
     messages.value = [];
     streaming.value = false;
     capturedFields.value = [];
+    sectionProgress.value = { ...DEFAULT_SECTION_PROGRESS };
     persist();
   }
 
@@ -162,5 +190,7 @@ export const useChatStore = defineStore('chat', () => {
     attach, appendUser, startAgent, appendDelta, applyFields, endAgent, reset,
     // v0.18-C 结构化卡片
     appendToolCall, attachToolResult, appendThinking, appendError,
+    // v0.20 Wave1 section 进度
+    sectionProgress, setSectionStatus, resetSectionProgress,
   };
 });

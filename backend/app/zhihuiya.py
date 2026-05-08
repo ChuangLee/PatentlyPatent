@@ -21,6 +21,43 @@ class ZhihuiyaError(RuntimeError):
     pass
 
 
+# v0.20 Wave1：非法 query 兜底（不打外网，直接降级）
+_QUERY_MAX_LEN = 500
+_QUERY_BLACKLIST = (
+    "DROP TABLE", "DROP DATABASE", "TRUNCATE TABLE",
+    "DELETE FROM", "UPDATE SET", "--; ", "/*", "*/",
+    "<script", "</script",
+)
+
+
+def _validate_query(query: Any, label: str) -> tuple[bool, str]:
+    """返回 (ok, reason). ok=False 时上层走 fallback，并记一条 INFO。"""
+    if query is None:
+        return False, "query is None"
+    if not isinstance(query, str):
+        return False, f"query not str (type={type(query).__name__})"
+    q = query.strip()
+    if not q:
+        return False, "query empty"
+    if len(q) > _QUERY_MAX_LEN:
+        return False, f"query too long len={len(q)}>{_QUERY_MAX_LEN}"
+    upper = q.upper()
+    for kw in _QUERY_BLACKLIST:
+        if kw in upper:
+            return False, f"query contains blacklist token '{kw}'"
+    return True, ""
+
+
+def _log_degrade(label: str, query: Any, reason: str) -> None:
+    """v0.20 Wave1：每次降级写 INFO，含 query 前 50 字 + 原因。"""
+    qpreview = ""
+    if isinstance(query, str):
+        qpreview = query.strip().replace("\n", " ")[:50]
+    elif query is not None:
+        qpreview = str(query)[:50]
+    logger.info("zhihuiya degrade: label=%s query='%s' reason=%s", label, qpreview, reason)
+
+
 # ---- TTL cache (in-process, no extra deps) ------------------------------
 _CACHE_TTL = 300.0   # 5 min
 _CACHE_MAX = 256
@@ -81,8 +118,13 @@ async def _cached_call(
     fn: Callable[[], Awaitable[Any]],
     fallback: Any,
     label: str,
+    *,
+    query_for_log: Any = None,
 ) -> Any:
-    """统一：先查缓存 → 调 API → 失败时降级返回 fallback（不入缓存以便下次重试）"""
+    """统一：先查缓存 → 调 API → 失败时降级返回 fallback（不入缓存以便下次重试）
+
+    v0.20 Wave1：所有降级路径都写 INFO 日志，含 query 前 50 字 + 原因。
+    """
     cached = _cache_get(cache_key)
     if cached is not None:
         logger.info("zhihuiya cache hit: %s", label)
@@ -92,21 +134,31 @@ async def _cached_call(
         _cache_set(cache_key, result)
         return result
     except (httpx.TimeoutException, httpx.ConnectError, httpx.ReadTimeout) as e:
-        logger.warning("zhihuiya timeout, degrading to empty payload: %s err=%s", label, e)
+        _log_degrade(label, query_for_log, f"timeout/conn err={type(e).__name__}")
         return fallback
     except httpx.HTTPStatusError as e:
         sc = e.response.status_code if e.response is not None else 0
         if sc >= 500:
-            logger.warning("zhihuiya 5xx, degrading: %s status=%s", label, sc)
+            _log_degrade(label, query_for_log, f"http {sc} (5xx)")
             return fallback
-        # 4xx 让上层 ZhihuiyaError 路径走（保留可见性）
-        logger.warning("zhihuiya http error: %s status=%s", label, sc)
+        # 4xx 也降级（保留 fallback 行为不抛 500），但记入 INFO
+        _log_degrade(label, query_for_log, f"http {sc} (4xx)")
+        return fallback
+    except ZhihuiyaError as e:
+        _log_degrade(label, query_for_log, f"biz err: {e}")
+        return fallback
+    except Exception as e:  # noqa: BLE001
+        _log_degrade(label, query_for_log, f"unexpected: {type(e).__name__}: {e}")
         return fallback
 
 
 # ---- public API --------------------------------------------------------
 async def query_search_count(query: str) -> int:
     """任意检索式命中量（POST）— 智慧芽返回字段为 total_search_result_count，兼容老 SDK 文档的 count"""
+    ok, reason = _validate_query(query, "count")
+    if not ok:
+        _log_degrade("count", query, f"invalid query: {reason}")
+        return 0
     key = _cache_key("query-search-count", query=query)
 
     async def _do() -> int:
@@ -114,11 +166,17 @@ async def query_search_count(query: str) -> int:
         data = body.get("data", {}) or {}
         return int(data.get("total_search_result_count", data.get("count", 0)))
 
-    return await _cached_call(key, _do, fallback=0, label=f"count[{query[:60]}]")
+    return await _cached_call(
+        key, _do, fallback=0, label=f"count[{query[:60]}]", query_for_log=query,
+    )
 
 
 async def patent_trends(query: str, lang: str = "cn") -> list[dict]:
     """专利申请趋势（年）— GET"""
+    ok, reason = _validate_query(query, "trends")
+    if not ok:
+        _log_degrade("trends", query, f"invalid query: {reason}")
+        return []
     key = _cache_key("patent-trends", query=query, lang=lang)
 
     async def _do() -> list[dict]:
@@ -126,11 +184,17 @@ async def patent_trends(query: str, lang: str = "cn") -> list[dict]:
                               params={"query_text": query, "lang": lang})
         return body.get("data", []) or []
 
-    return await _cached_call(key, _do, fallback=[], label=f"trends[{query[:60]}]")
+    return await _cached_call(
+        key, _do, fallback=[], label=f"trends[{query[:60]}]", query_for_log=query,
+    )
 
 
 async def applicant_ranking(query: str, lang: str = "cn", n: int = 10) -> list[dict]:
     """Top 申请人 — GET"""
+    ok, reason = _validate_query(query, "applicants")
+    if not ok:
+        _log_degrade("applicants", query, f"invalid query: {reason}")
+        return []
     key = _cache_key("applicant-ranking", query=query, lang=lang, n=n)
 
     async def _do() -> list[dict]:
@@ -138,10 +202,16 @@ async def applicant_ranking(query: str, lang: str = "cn", n: int = 10) -> list[d
                               params={"query_text": query, "lang": lang, "limit": n})
         return body.get("data", []) or []
 
-    return await _cached_call(key, _do, fallback=[], label=f"applicants[{query[:60]}]")
+    return await _cached_call(
+        key, _do, fallback=[], label=f"applicants[{query[:60]}]", query_for_log=query,
+    )
 
 
 async def inventor_ranking(query: str, lang: str = "cn", n: int = 10) -> list[dict]:
+    ok, reason = _validate_query(query, "inventors")
+    if not ok:
+        _log_degrade("inventors", query, f"invalid query: {reason}")
+        return []
     key = _cache_key("inventor-ranking", query=query, lang=lang, n=n)
 
     async def _do() -> list[dict]:
@@ -149,11 +219,17 @@ async def inventor_ranking(query: str, lang: str = "cn", n: int = 10) -> list[di
                               params={"query_text": query, "lang": lang, "limit": n})
         return body.get("data", []) or []
 
-    return await _cached_call(key, _do, fallback=[], label=f"inventors[{query[:60]}]")
+    return await _cached_call(
+        key, _do, fallback=[], label=f"inventors[{query[:60]}]", query_for_log=query,
+    )
 
 
 async def most_cited(query: str, lang: str = "cn", n: int = 10) -> list[dict]:
     """高被引专利 — GET"""
+    ok, reason = _validate_query(query, "most-cited")
+    if not ok:
+        _log_degrade("most-cited", query, f"invalid query: {reason}")
+        return []
     key = _cache_key("most-cited", query=query, lang=lang, n=n)
 
     async def _do() -> list[dict]:
@@ -161,11 +237,17 @@ async def most_cited(query: str, lang: str = "cn", n: int = 10) -> list[dict]:
                               params={"query_text": query, "lang": lang, "limit": n})
         return body.get("data", []) or []
 
-    return await _cached_call(key, _do, fallback=[], label=f"most-cited[{query[:60]}]")
+    return await _cached_call(
+        key, _do, fallback=[], label=f"most-cited[{query[:60]}]", query_for_log=query,
+    )
 
 
 async def simple_legal_status(patent_number: str) -> dict:
     """公开号 → 法律状态 — POST"""
+    ok, reason = _validate_query(patent_number, "legal-status")
+    if not ok:
+        _log_degrade("legal-status", patent_number, f"invalid pn: {reason}")
+        return {}
     key = _cache_key("simple-legal-status", pn=patent_number)
 
     async def _do() -> dict:
@@ -173,4 +255,7 @@ async def simple_legal_status(patent_number: str) -> dict:
                               json={"patent_number": patent_number})
         return body.get("data", {}) or {}
 
-    return await _cached_call(key, _do, fallback={}, label=f"legal-status[{patent_number}]")
+    return await _cached_call(
+        key, _do, fallback={}, label=f"legal-status[{patent_number}]",
+        query_for_log=patent_number,
+    )
