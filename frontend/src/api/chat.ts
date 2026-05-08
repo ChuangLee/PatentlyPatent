@@ -41,4 +41,14 @@ export const chatApi = {
       body: JSON.stringify({ idea, max_turns: maxTurns }),
     }, onEvent, signal);
   },
+
+  /** v0.21: agent SDK 一键全程挖掘 — 串跑 5 节 (prior_art / summary / embodiments / claims / drawings_description) */
+  mineFullStream(projectId: string, idea: string, onEvent: (e: ChatStreamEvent) => void,
+                 signal?: AbortSignal): Promise<void> {
+    return consumeSSE(`/api/agent/mine_full/${projectId}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ idea }),
+    }, onEvent, signal);
+  },
 };

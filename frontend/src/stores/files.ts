@@ -14,6 +14,8 @@ export const useFilesStore = defineStore('files', () => {
   const tree = ref<FileNode[]>([]);
   const showHidden = ref(false);
   const currentFileId = ref<string | null>(null);
+  // v0.21 任务 4: 最近一次 agent spawn 的节点 id，用于通知 FileTree 滚动到该节点
+  const lastSpawnedNodeId = ref<string | null>(null);
 
   function persist() {
     if (!projectId.value) return;
@@ -137,10 +139,17 @@ export const useFilesStore = defineStore('files', () => {
     currentFileId.value = null;
   }
 
+  /** v0.21 任务 4: 标记最近一次 agent spawn 的节点 id（FileTree watch 后滚动） */
+  function markSpawnedNode(id: string) {
+    lastSpawnedNodeId.value = id;
+  }
+
   return {
     projectId, tree, showHidden, currentFileId, currentNode,
     visibleRoots, children, getNode, breadcrumb, removeMany,
     attach, selectFile, addFile, addFolder, pushNode,
     rename, move, remove, writeContent, toggleHidden, reset,
+    // v0.21 任务 4
+    lastSpawnedNodeId, markSpawnedNode,
   };
 });

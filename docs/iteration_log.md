@@ -423,3 +423,52 @@ title: PatentlyPatent 迭代日志
 - 性能基线测试：5 并发用户 × N 次挖掘的吞吐 + 每分钟 cost
 - 错误监控 dashboard：admin Dashboard 加 error 时间序列图
 - 文件树 a-tree 滚动到新 spawn 文件位置
+
+
+## v0.21 · 2026-05-08 15:00 · 收尾原型 — 12 件并行 — JWT auth + e2e + 限流 + 预算 + cache 命中 + 文档
+
+**核心收尾（subagent A）— 4 件**
+- A1. backend/tests/test_e2e_full.py：3 passed (报门→mine_full→get_project→docx 导出)
+- A2. SSE 并发限流：concurrency.py + asyncio.Semaphore(5)，4 入口包裹 (mine_spike/mine_full/chat/auto_mining)，超限 503
+- A3. cost 预算：budget.py，env PP_DAILY_BUDGET_WARN=$2 / BLOCK=$10，每次 update_after_run 聚合，超限拒绝 SSE
+- A4. backend/benchmark/load_test.py：5 并发 × N 次 dry-run 输出 p50/p95/avg/total_cost；prod URL 需 --i-know-its-prod
+
+**JWT auth + cache preset（subagent B 部分挂在收尾报告，代码已落地）— 2 件**
+- B1. JWT auth：PyJWT (HS256) + login 端点返 token + get_current_user dependency；老 X-User-Id 兼容；POST /api/projects 已 wrap；前端 axios interceptor 加 Bearer + 401 跳 login
+- B2. **Prompt cache 命中 ✅ 实测**：SystemPromptPreset(exclude_dynamic_sections=True) 切入 ClaudeAgentOptions
+  - 第 1 次：cost $0.0534 / cache_creation=4591 / cache_read=21556
+  - 第 2 次同 idea：cost **$0.0213**（降 60%）/ cache_creation=0 / cache_read=26147
+  - 写回 docs/prompt_cache_research.md
+
+**前端联动（subagent C）— 4 件**
+- C1. 工作台「⚡ 一键全程挖掘」按钮（agent_sdk 模式可见，非只读）→ chatRef.mineFull() → /api/agent/mine_full SSE
+- C2. autoMine 在 agent_sdk 模式从 mine_spike 切到 mine_full（端到端 5 节）
+- C3. admin Dashboard error 时间序列柱图（24h × 1h bucket）
+- C4. 文件树 a-tree 滚动到新 spawn 文件：files.lastSpawnedNodeId ref + FileTree watch + scrollIntoView smooth + pp-spawn-flash 1.6s 高亮
+
+**文档（subagent D）— 2 件**
+- D1. docs/user_guide.md 159 行 + 2 mermaid（工作流 / 文件树）
+- D2. docs/deploy_runbook.md 175 行 + 1 mermaid（部署架构），含 systemd / nginx / claude CLI 认证刷新 / 备份 / 紧急处理 / 升级流程
+
+**测试**
+- pnpm test 44/44 ; pytest 3 passed
+- 公网部署：ping ok / budget_status daily_sum=$1.09 (warn=$2 / block=$10) / sse_in_flight=0/5
+- JWT login 返 token (163 chars) ; me 端点解 Bearer ok
+- prompt cache **第 2 次 cost 降 60%**
+
+**v0.21 共完成 12 件**
+
+**原型完成度评估：**
+- ✅ 端到端：报门 → 工作台 5 步 timeline → ⚡一键全程 → 5 节 SSE 流 → 落盘 → docx 导出
+- ✅ 双轨：mining 老路径（占位骨架，稳定）+ agent SDK 真路径（自驱多 tool，cost ~$0.02 同 idea 二次）
+- ✅ 监控可观测：agent_runs 表 + cost 时序 + fallback 柱图 + error 24h bucket + budget_status
+- ✅ 安全护栏：JWT auth scaffold / SSE 限流 / 预算阻断
+- ✅ 部署运维：systemd override / claude CLI OAuth / 用户+运维手册
+
+**剩余非必要项（v0.22+ 增量）**
+- benchmark 真实跑出 prod 性能基线数据（现仅 dry-run 框架）
+- 真用户库（替换 fake u1/u2）+ 密码哈希
+- cron 备份 + sentry 错误监控
+- 多租户隔离（同 idea 不同 user 的 cache 怎么避免穿透）
+- 前端报门 e2e ui 测试（playwright）
+- 更细粒度 prompt cache：tool 描述也单独 cache

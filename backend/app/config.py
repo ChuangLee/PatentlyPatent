@@ -60,6 +60,10 @@ class Settings(BaseModel):
         "1", "true", "yes",
     )
 
+    # v0.21：JWT auth（最小可用版）
+    jwt_secret: str = os.environ.get("PP_JWT_SECRET", "dev-secret-change-in-prod")
+    jwt_expire_hours: int = int(os.environ.get("PP_JWT_EXPIRE_HOURS", "24"))
+
     # 智慧芽
     zhihuiya_token: str = os.environ.get("ZHIHUIYA_TOKEN", "")
     zhihuiya_api_base: str = os.environ.get(

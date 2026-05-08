@@ -17,6 +17,8 @@ from pydantic import BaseModel
 from sse_starlette.sse import EventSourceResponse
 from sqlalchemy.orm import Session
 
+from ..budget import BudgetBlocked, ensure_not_blocked
+from ..concurrency import SSEBusy, acquire_sse_slot, release_sse_slot
 from ..db import get_db, session_scope
 from ..models import Project, FileNode
 from ..schemas import ChatRequest, AutoMineRequest, FileNodeOut
@@ -181,43 +183,56 @@ async def chat_stream(pid: str, body: ChatRequest, db: Session = Depends(get_db)
     )
     user_msg = body.userMsg or ""
 
+    # v0.21: 预算硬阻断 + SSE 并发限流
+    try:
+        ensure_not_blocked()
+    except BudgetBlocked as exc:
+        raise HTTPException(503, f"今日预算已超限：${exc.daily_sum:.4f}")
+    try:
+        await acquire_sse_slot("chat")
+    except SSEBusy:
+        raise HTTPException(503, "服务繁忙，请稍候")
+
     async def gen():
-        yield {"event": "thinking", "data": "{}"}
-        await asyncio.sleep(0.3)
+        try:
+            yield {"event": "thinking", "data": "{}"}
+            await asyncio.sleep(0.3)
 
-        # 收集 LLM 完整回答用于追加（前端仍按 chunk 流式渲染）
-        full_answer_chunks: list[str] = []
-        async for piece in stream_chat(user_msg, system=sys_prompt):
-            full_answer_chunks.append(piece)
-            yield {"event": "delta", "data": json.dumps({"chunk": piece}, ensure_ascii=False)}
+            # 收集 LLM 完整回答用于追加（前端仍按 chunk 流式渲染）
+            full_answer_chunks: list[str] = []
+            async for piece in stream_chat(user_msg, system=sys_prompt):
+                full_answer_chunks.append(piece)
+                yield {"event": "delta", "data": json.dumps({"chunk": piece}, ensure_ascii=False)}
 
-        full_answer = "".join(full_answer_chunks).strip()
+            full_answer = "".join(full_answer_chunks).strip()
 
-        # ── 章节路由 + 写回 ─────────────────────────────────────
-        target = route_answer(user_msg)
-        if target and full_answer:
-            try:
-                with session_scope() as db2:
-                    updated = _do_append(
-                        db2, pid,
-                        file_name=target["file"],
-                        anchor=target.get("anchor"),
-                        user_msg=user_msg,
-                        ai_summary=full_answer,
-                    )
-                    if updated is not None:
-                        node_out = FileNodeOut.model_validate(updated).model_dump(by_alias=True)
-                        # 通知前端：已经把回答归档进文件
-                        notice = f"\n\n📎 已把这条回答归档到 AI 输出/{target['file']}。\n"
-                        for chunk in split_grapheme(notice, 3):
-                            yield {"event": "delta", "data": json.dumps({"chunk": chunk}, ensure_ascii=False)}
-                        yield {"event": "file", "data": json.dumps({"node": node_out, "category": target.get("category")}, ensure_ascii=False)}
-            except Exception as e:
-                err_note = f"\n\n⚠️ 归档失败：{type(e).__name__}: {e}\n"
-                for chunk in split_grapheme(err_note, 3):
-                    yield {"event": "delta", "data": json.dumps({"chunk": chunk}, ensure_ascii=False)}
+            # ── 章节路由 + 写回 ─────────────────────────────────────
+            target = route_answer(user_msg)
+            if target and full_answer:
+                try:
+                    with session_scope() as db2:
+                        updated = _do_append(
+                            db2, pid,
+                            file_name=target["file"],
+                            anchor=target.get("anchor"),
+                            user_msg=user_msg,
+                            ai_summary=full_answer,
+                        )
+                        if updated is not None:
+                            node_out = FileNodeOut.model_validate(updated).model_dump(by_alias=True)
+                            # 通知前端：已经把回答归档进文件
+                            notice = f"\n\n📎 已把这条回答归档到 AI 输出/{target['file']}。\n"
+                            for chunk in split_grapheme(notice, 3):
+                                yield {"event": "delta", "data": json.dumps({"chunk": chunk}, ensure_ascii=False)}
+                            yield {"event": "file", "data": json.dumps({"node": node_out, "category": target.get("category")}, ensure_ascii=False)}
+                except Exception as e:
+                    err_note = f"\n\n⚠️ 归档失败：{type(e).__name__}: {e}\n"
+                    for chunk in split_grapheme(err_note, 3):
+                        yield {"event": "delta", "data": json.dumps({"chunk": chunk}, ensure_ascii=False)}
 
-        yield {"event": "done", "data": "{}"}
+            yield {"event": "done", "data": "{}"}
+        finally:
+            release_sse_slot("chat")
 
     return EventSourceResponse(gen())
 
@@ -278,7 +293,18 @@ async def auto_mining(pid: str, body: AutoMineRequest, db: Session = Depends(get
     }
     sections = build_sections(ctx)
 
+    # v0.21: 预算硬阻断 + SSE 并发限流
+    try:
+        ensure_not_blocked()
+    except BudgetBlocked as exc:
+        raise HTTPException(503, f"今日预算已超限：${exc.daily_sum:.4f}")
+    try:
+        await acquire_sse_slot("auto_mining")
+    except SSEBusy:
+        raise HTTPException(503, "服务繁忙，请稍候")
+
     async def gen():
+      try:
         yield {"event": "thinking", "data": "{}"}
         await asyncio.sleep(0.3)
 
@@ -373,5 +399,7 @@ async def auto_mining(pid: str, body: AutoMineRequest, db: Session = Depends(get
             await asyncio.sleep(0.02)
 
         yield {"event": "done", "data": "{}"}
+      finally:
+        release_sse_slot("auto_mining")
 
     return EventSourceResponse(gen())

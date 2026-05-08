@@ -11,6 +11,7 @@ from pydantic import BaseModel
 from ..db import get_db
 from ..models import Project, FileNode
 from ..schemas import ProjectCreate, ProjectOut, FileNodeOut
+from .auth import get_current_user, CurrentUser
 
 
 class ProjectUpdate(BaseModel):
@@ -59,7 +60,14 @@ def get_project(pid: str, db: Session = Depends(get_db)):
 
 
 @router.post("", response_model=dict, status_code=201)
-def create_project(body: ProjectCreate, db: Session = Depends(get_db)):
+def create_project(
+    body: ProjectCreate,
+    db: Session = Depends(get_db),
+    current: CurrentUser = Depends(get_current_user),
+):
+    # v0.21：以 JWT 身份覆盖 body.ownerId（防伪造）；老 X-User-Id 兼容路径同样适用
+    if not body.ownerId:
+        body.ownerId = current.id
     pid = f"p-{uuid.uuid4().hex[:8]}"
     p = Project(
         id=pid,

@@ -13,6 +13,8 @@ const statusChartRef = ref<HTMLDivElement | null>(null);
 const patChartRef = ref<HTMLDivElement | null>(null);
 const runsTimelineRef = ref<HTMLDivElement | null>(null);
 const runsFallbackRef = ref<HTMLDivElement | null>(null);
+// v0.21 任务 3: error 数随时间柱图 ref
+const runsErrorBarRef = ref<HTMLDivElement | null>(null);
 
 const STATUS_LABEL: Record<ProjectStatus, string> = {
   drafting: '草稿', researching: '挖掘中', reporting: '检索完成', completed: '已完成（已导出）',
@@ -273,6 +275,51 @@ async function drawRunsCharts() {
     });
   }
 
+  // ── v0.21 任务 3: error 数随时间柱图（最近 24 小时按小时 bucket）
+  if (runsErrorBarRef.value) {
+    const inst = echarts.init(runsErrorBarRef.value);
+    inst.clear();
+    const HOURS = 24;
+    const now = Date.now();
+    // bucket 起点对齐到当前小时整点
+    const curHour = new Date(now);
+    curHour.setMinutes(0, 0, 0);
+    const startMs = curHour.getTime() - (HOURS - 1) * 3600_000;
+    // 24 个 bucket：[startMs, startMs+1h), ..., [startMs+23h, startMs+24h)
+    const labels: string[] = [];
+    const counts: number[] = new Array(HOURS).fill(0);
+    for (let i = 0; i < HOURS; i++) {
+      const t = new Date(startMs + i * 3600_000);
+      const hh = String(t.getHours()).padStart(2, '0');
+      labels.push(`${hh}:00`);
+    }
+    // 注意：这里用 runsRaw（全部）而非 runsFiltered，避免被 endpoint 过滤丢失全局视图。
+    for (const r of runsRaw.value) {
+      if (!r.created_at) continue;
+      // error count 定义：error 字段非空 OR fallback_used=true
+      const isErr = !!r.error || !!r.fallback_used;
+      if (!isErr) continue;
+      const t = new Date(r.created_at).getTime();
+      if (!Number.isFinite(t)) continue;
+      const idx = Math.floor((t - startMs) / 3600_000);
+      if (idx >= 0 && idx < HOURS) counts[idx] += 1;
+    }
+    inst.setOption({
+      title: { text: 'error / fallback 数随时间（最近 24h，按小时）', left: 'center', textStyle: { fontSize: 13 } },
+      tooltip: { trigger: 'axis', axisPointer: { type: 'shadow' } },
+      grid: { left: 50, right: 20, top: 36, bottom: 28 },
+      xAxis: { type: 'category', data: labels, axisLabel: { fontSize: 10 } },
+      yAxis: { type: 'value', name: '次数', minInterval: 1 },
+      series: [{
+        name: 'error+fallback',
+        type: 'bar',
+        data: counts,
+        itemStyle: { color: '#cf1322' },
+        barMaxWidth: 18,
+      }],
+    });
+  }
+
   // ── 2) fallback / error 率 分组柱图
   if (runsFallbackRef.value) {
     const inst = echarts.init(runsFallbackRef.value);
@@ -451,6 +498,13 @@ async function runAbCompare() {
       </a-col>
       <a-col :span="12">
         <div ref="runsFallbackRef" style="height:240px"></div>
+      </a-col>
+    </a-row>
+
+    <!-- v0.21 任务 3: error 数随时间柱图（最近 24h，按小时 bucket） -->
+    <a-row :gutter="12" style="margin-bottom:12px">
+      <a-col :span="24">
+        <div ref="runsErrorBarRef" style="height:240px"></div>
       </a-col>
     </a-row>
 

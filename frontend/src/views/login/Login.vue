@@ -1,6 +1,5 @@
 <script setup lang="ts">
 import { useRouter } from 'vue-router';
-import { authApi } from '@/api/auth';
 import { useAuthStore } from '@/stores/auth';
 import message from 'ant-design-vue/es/message';
 import type { Role } from '@/types';
@@ -10,8 +9,8 @@ const auth = useAuthStore();
 
 async function loginAs(role: Role) {
   try {
-    const user = await authApi.loginAs(role);
-    auth.login(user);
+    // v0.21：走 store 的 loginAs（内部调真 API /auth/login 拿 JWT，存 localStorage）
+    const user = await auth.loginAs(role);
     message.success(`已登录为 ${user.name}`);
     router.push(role === 'admin' ? '/admin/dashboard' : '/employee/dashboard');
   } catch (e) {

@@ -3,7 +3,7 @@
  * 文件树组件 — Antd Vue a-tree + 自定义节点 slot
  * 数据源：useFilesStore（要求父组件先 attach）
  */
-import { computed, ref, h } from 'vue';
+import { computed, ref, h, watch, nextTick } from 'vue';
 import ATree from 'ant-design-vue/es/tree';
 import AButton from 'ant-design-vue/es/button';
 import AModal from 'ant-design-vue/es/modal';
@@ -487,6 +487,57 @@ function refreshTree() {
 
 function toggleWrap() { wrapNames.value = !wrapNames.value; }
 
+// ─── v0.21 任务 4: 滚动到 agent spawn 的新节点 ───────────────────────────────
+const treeContainerRef = ref<HTMLElement | null>(null);
+
+/**
+ * 滚动到指定 id 的树节点。
+ * antd-vue 的 a-tree 节点 DOM 没有标准的 data-node-key，但 .ant-tree-treenode 节点可通过
+ * 内部唯一的 .ant-tree-node-content-wrapper / span 文本定位；这里采取保险策略：
+ *   1) 先确保该节点的所有祖先 expanded（否则 DOM 不存在）
+ *   2) 用 querySelector 在容器内找带 [data-pp-node-id="<id>"] 属性的渲染元素（renderNodeTitle 写入）
+ *   3) 找到则 scrollIntoView({behavior:'smooth', block:'center'}) + 短暂高亮
+ */
+async function scrollToNode(id: string) {
+  // 1) 展开所有祖先
+  const node = files.getNode(id);
+  if (!node) return;
+  const ancestors: string[] = [];
+  let cur: FileNode | undefined = node;
+  while (cur && cur.parentId) {
+    ancestors.push(cur.parentId);
+    cur = files.getNode(cur.parentId);
+  }
+  let expandedChanged = false;
+  for (const aid of ancestors) {
+    if (!expandedKeys.value.includes(aid)) {
+      expandedKeys.value.push(aid);
+      expandedChanged = true;
+    }
+  }
+  // 等 a-tree 重渲染
+  if (expandedChanged) await nextTick();
+  await nextTick();
+
+  // 2) 查 DOM
+  const container = treeContainerRef.value;
+  if (!container) return;
+  const el = container.querySelector<HTMLElement>(`[data-pp-node-id="${CSS.escape(id)}"]`);
+  if (!el) return;
+  // 3) 滚动 + 闪烁高亮
+  el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  el.classList.add('pp-spawn-flash');
+  setTimeout(() => el.classList.remove('pp-spawn-flash'), 1600);
+}
+
+// watch store 里的 lastSpawnedNodeId — agent 写入 → FileTree 自动滚
+watch(() => files.lastSpawnedNodeId, (id) => {
+  if (!id) return;
+  scrollToNode(id);
+});
+
+defineExpose({ scrollToNode });
+
 // 节点 title 渲染（slot）
 function renderNodeTitle(node: AntdTreeNode) {
   const raw = node.raw;
@@ -497,6 +548,8 @@ function renderNodeTitle(node: AntdTreeNode) {
     'span',
     {
       class: ['pp-tree-node', isDragTarget ? 'pp-drag-over' : ''].filter(Boolean).join(' '),
+      // v0.21 任务 4: 暴露节点 id 给 scrollToNode 查找
+      'data-pp-node-id': raw.id,
       onContextmenu: (e: MouseEvent) => {
         e.preventDefault();
         contextNodeId.value = raw.id;
@@ -573,6 +626,7 @@ function renderNodeTitle(node: AntdTreeNode) {
 
     <!-- 树（含原生 HTML drop zone：从 OS 拖文件到此区域批上传） -->
     <div
+      ref="treeContainerRef"
       class="pp-tree-dropzone"
       :class="{ 'pp-tree-drop-active': nativeDropActive }"
       style="flex:1;overflow:auto;padding:6px;position:relative"
@@ -741,6 +795,16 @@ function renderNodeTitle(node: AntdTreeNode) {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+/* v0.21 任务 4: agent spawn 节点闪烁高亮 */
+.pp-spawn-flash {
+  animation: pp-spawn-flash-anim 1.6s ease-out;
+  border-radius: 4px;
+}
+@keyframes pp-spawn-flash-anim {
+  0%   { background: rgba(22, 119, 255, 0.45); box-shadow: 0 0 0 4px rgba(22, 119, 255, 0.35); }
+  60%  { background: rgba(22, 119, 255, 0.18); box-shadow: 0 0 0 2px rgba(22, 119, 255, 0.18); }
+  100% { background: transparent; box-shadow: none; }
 }
 /* 多行显示：节点 title 换行 */
 :deep(.pp-tree-wrap .ant-tree-node-content-wrapper) {

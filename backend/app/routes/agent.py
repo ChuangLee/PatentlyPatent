@@ -24,6 +24,8 @@ from sse_starlette.sse import EventSourceResponse
 from ..agent_sdk_spike import agent_mine_stream
 from .. import agent_section_demo
 from ..agent_section_demo import mine_section_via_agent
+from ..budget import BudgetBlocked, ensure_not_blocked, update_after_run
+from ..concurrency import SSEBusy, acquire_sse_slot, release_sse_slot
 from ..config import settings
 from ..db import SessionLocal, get_db
 from ..mining import build_prior_art_section_legacy, _DOMAIN_LABEL
@@ -41,12 +43,25 @@ class MineSpikeRequest(BaseModel):
 
 @router.post("/mine_spike")
 async def mine_spike(body: MineSpikeRequest):
+    # v0.21: 预算硬阻断 + SSE 并发限流
+    try:
+        ensure_not_blocked()
+    except BudgetBlocked as exc:
+        raise HTTPException(503, f"今日预算已超限：${exc.daily_sum:.4f}")
+    try:
+        await acquire_sse_slot("mine_spike")
+    except SSEBusy:
+        raise HTTPException(503, "服务繁忙，请稍候")
+
     async def gen():
-        async for ev in agent_mine_stream(body.idea, max_turns=body.max_turns):
-            yield {
-                "event": ev.get("type", "message"),
-                "data": json.dumps(ev, ensure_ascii=False),
-            }
+        try:
+            async for ev in agent_mine_stream(body.idea, max_turns=body.max_turns):
+                yield {
+                    "event": ev.get("type", "message"),
+                    "data": json.dumps(ev, ensure_ascii=False),
+                }
+        finally:
+            release_sse_slot("mine_spike")
 
     return EventSourceResponse(gen())
 
@@ -280,6 +295,11 @@ async def ab_compare(
                 raise
             finally:
                 _ab_log_db.close()
+            # v0.21: 预算告警
+            try:
+                update_after_run("ab_compare")
+            except Exception:  # noqa: BLE001
+                pass
         except Exception as _exc:  # noqa: BLE001
             logger.warning("ab_compare agent_run_log write failed: %s", _exc)
 
@@ -461,6 +481,16 @@ async def mine_full(
     title = p.title or "未命名项目"
     domain_label = p.custom_domain or _DOMAIN_LABEL.get(p.domain or "", p.domain or "其他")
 
+    # v0.21: 预算硬阻断 + SSE 并发限流
+    try:
+        ensure_not_blocked()
+    except BudgetBlocked as exc:
+        raise HTTPException(503, f"今日预算已超限：${exc.daily_sum:.4f}")
+    try:
+        await acquire_sse_slot("mine_full")
+    except SSEBusy:
+        raise HTTPException(503, "服务繁忙，请稍候")
+
     async def gen():
         t0 = time.monotonic()
         total_cost = 0.0
@@ -542,7 +572,10 @@ async def mine_full(
                     error=last_error,
                     is_mock=not settings.use_agent_sdk_real,
                 )
+                # v0.21: 预算告警（写完 log 立即对账）
+                await asyncio.to_thread(update_after_run, "mine_full")
             except Exception as exc:  # noqa: BLE001
                 logger.warning("mine_full agent_run_log write failed: %s", exc)
+            release_sse_slot("mine_full")
 
     return EventSourceResponse(gen())

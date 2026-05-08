@@ -28,8 +28,36 @@ const project = ref<Project | null>(null);
 const round = ref(1);
 const chatRef = ref<InstanceType<typeof AgentChatStream> | null>(null);
 const generating = ref(false);
+// v0.21 任务 1: 一键全程挖掘 loading
+const fullMining = ref(false);
 
 const isReadonly = computed(() => auth.role === 'admin');
+
+/** v0.21 任务 1: 触发 mine_full 一键端到端 */
+async function runFullMining() {
+  if (!project.value || fullMining.value || chat.streaming) return;
+  if (!chatRef.value) {
+    message.error('聊天组件未就绪');
+    return;
+  }
+  fullMining.value = true;
+  try {
+    const idea = [
+      project.value.title,
+      project.value.description,
+      project.value.intake?.notes,
+    ].filter(Boolean).join('\n');
+    await chatRef.value.mineFull(idea || '（无描述）');
+    // disclosure 路由 redirect 回 workbench，所以不真正跳转 — 提示成功即可
+    message.success('一键全程挖掘完成 ✓');
+  } catch (e) {
+    // mineFull 内部已经 message.error 过了，这里不重复
+    console.error('[runFullMining]', e);
+  } finally {
+    fullMining.value = false;
+    chat.endAgent();
+  }
+}
 
 async function generateDisclosureDocx() {
   if (!project.value) return;
@@ -139,6 +167,17 @@ function onRoundComplete() {
     sub-title="工作台 · 文件 + AI 对话 + 预览"
   >
     <template #extra>
+      <!-- v0.21 任务 1: 一键全程挖掘（仅 agent_sdk 模式可见） -->
+      <a-button
+        v-if="!isReadonly && project && ui.agentMode === 'agent_sdk'"
+        type="primary"
+        danger
+        :loading="fullMining"
+        :disabled="chat.streaming && !fullMining"
+        @click="runFullMining"
+      >
+        ⚡ 一键全程挖掘
+      </a-button>
       <a-button
         v-if="project"
         :type="ui.workbenchSplitView ? 'primary' : 'default'"
@@ -192,6 +231,7 @@ function onRoundComplete() {
     <div class="pp-pane pp-pane-mid">
       <AgentChatStream
         v-if="project"
+        ref="chatRef"
         :project-id="project.id"
         :round="round"
         @round-complete="onRoundComplete"

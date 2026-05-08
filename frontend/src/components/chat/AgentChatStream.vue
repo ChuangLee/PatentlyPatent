@@ -81,6 +81,7 @@ async function send() {
           files.pushNode(e.node);
         }
         files.selectFile(e.node.id);
+        files.markSpawnedNode(e.node.id);  // v0.21 任务 4: 通知 FileTree 滚动到该节点
         autoOpenSplitOnFirstFile();
       } else if (e.type === 'done') {
         chat.endAgent();
@@ -111,6 +112,7 @@ async function autoMine(ctx: Parameters<typeof chatApi.autoMine>[1]) {
         if (existing) Object.assign(existing, e.node);
         else files.pushNode(e.node);
         files.selectFile(e.node.id);
+        files.markSpawnedNode(e.node.id);  // v0.21 任务 4: 触发 FileTree 滚动
         autoOpenSplitOnFirstFile();
       }
       // v0.20 Wave1 任务 1: section_start / section_done 由后端 mine_full SSE 推送
@@ -128,8 +130,18 @@ async function autoMine(ctx: Parameters<typeof chatApi.autoMine>[1]) {
       else if (e.type === 'done') chat.endAgent();
     };
     if (useAgentSdk) {
+      // v0.21 任务 2: agent_sdk 模式从 mine_spike 切到 mine_full（端到端 5 节）
       const idea = [ctx.title, ctx.description, ctx.intake?.notes].filter(Boolean).join('\n');
-      await chatApi.agentMineSpike(idea || '（无描述）', handler, currentAbort.signal);
+      try {
+        await chatApi.mineFullStream(props.projectId, idea || '（无描述）', handler, currentAbort.signal);
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        // 兜底：仅提示，不再退回老 auto-mining，避免左右横跳
+        const { default: antMessage } = await import('ant-design-vue/es/message');
+        antMessage.error(`mine_full 失败：${msg}`);
+        chat.appendError(`mine_full 失败：${msg}`);
+        chat.endAgent();
+      }
     } else {
       await chatApi.autoMine(props.projectId, ctx, handler, currentAbort.signal);
     }
@@ -138,7 +150,53 @@ async function autoMine(ctx: Parameters<typeof chatApi.autoMine>[1]) {
   }
 }
 
-defineExpose({ autoMine });
+/** v0.21 任务 1: 一键全程挖掘 — agent_sdk 模式专用，由父组件按钮触发 */
+async function mineFull(idea: string) {
+  if (chat.streaming) return;
+  chat.resetSectionProgress();
+  chat.startAgent();
+  currentAbort = new AbortController();
+  try {
+    const handler = (e: import('@/types').ChatStreamEvent) => {
+      if (e.type === 'delta') chat.appendDelta(e.chunk);
+      else if (e.type === 'thinking' && e.text) chat.appendThinking(e.text);
+      else if (e.type === 'tool_use') chat.appendToolCall(e.name, e.input, e.id);
+      else if (e.type === 'tool_result') chat.attachToolResult(e.text, e.data);
+      else if (e.type === 'error') chat.appendError(e.message);
+      else if (e.type === 'file') {
+        const existing = files.tree.find(n => n.id === e.node.id);
+        if (existing) Object.assign(existing, e.node);
+        else files.pushNode(e.node);
+        files.selectFile(e.node.id);
+        files.markSpawnedNode(e.node.id);  // v0.21 任务 4: 触发 FileTree 滚动
+        autoOpenSplitOnFirstFile();
+      }
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      else if ((e as any).type === 'section_start' && (e as any).section) {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        chat.setSectionStatus((e as any).section, 'running');
+      }
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      else if ((e as any).type === 'section_done' && (e as any).section) {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        chat.setSectionStatus((e as any).section, 'done');
+      }
+      else if (e.type === 'done') chat.endAgent();
+    };
+    await chatApi.mineFullStream(props.projectId, idea || '（无描述）', handler, currentAbort.signal);
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    const { default: antMessage } = await import('ant-design-vue/es/message');
+    antMessage.error(`一键挖掘失败：${msg}`);
+    chat.appendError(`一键挖掘失败：${msg}`);
+    chat.endAgent();
+    throw err;
+  } finally {
+    currentAbort = null;
+  }
+}
+
+defineExpose({ autoMine, mineFull });
 </script>
 
 <template>

@@ -539,8 +539,16 @@ async def _stream_real_sdk(idea_text: str, max_turns: int) -> AsyncIterator[dict
     )
 
     server, allowed = _build_mcp_server()
+    # v0.21：用 SystemPromptPreset(exclude_dynamic_sections=True) 让 system 前缀稳定，
+    # CLI/底层 API 自动命中 ephemeral cache（前提：CLI 版本支持，旧 CLI 静默忽略）。
+    system_prompt_preset = {
+        "type": "preset",
+        "preset": "claude_code",
+        "append": SYSTEM_PROMPT,
+        "exclude_dynamic_sections": True,
+    }
     options = ClaudeAgentOptions(
-        system_prompt=SYSTEM_PROMPT,
+        system_prompt=system_prompt_preset,
         mcp_servers={"patent-tools": server},
         allowed_tools=allowed,
         max_turns=max_turns,
@@ -583,12 +591,18 @@ async def _stream_real_sdk(idea_text: str, max_turns: int) -> AsyncIterator[dict
                             "text": "\n".join(text_parts),
                         }
         elif isinstance(msg, ResultMessage):
-            yield {
+            usage = getattr(msg, "usage", None) or {}
+            done_ev = {
                 "type": "done",
                 "stop_reason": getattr(msg, "stop_reason", None),
                 "total_cost_usd": getattr(msg, "total_cost_usd", None),
                 "num_turns": getattr(msg, "num_turns", None),
+                # v0.21：把 usage 整个 dict 透出，方便前端/日志看 cache hit
+                "usage": usage,
+                "cache_creation_input_tokens": usage.get("cache_creation_input_tokens"),
+                "cache_read_input_tokens": usage.get("cache_read_input_tokens"),
             }
+            yield done_ev
             return
         else:
             logger.debug("agent_sdk: unhandled msg type %s", cls)

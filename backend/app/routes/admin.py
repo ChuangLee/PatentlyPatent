@@ -8,6 +8,8 @@ from fastapi import APIRouter, Depends
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from ..budget import check_daily_budget
+from ..concurrency import SSE_MAX_CONCURRENCY, in_flight_count
 from ..db import get_db
 from ..models import AgentRunLog
 
@@ -39,3 +41,12 @@ def list_agent_runs(limit: int = 50, db: Session = Depends(get_db)):
         }
         for r in rows
     ]
+
+
+@router.get("/budget_status")
+def budget_status():
+    """v0.21: 当日预算 + SSE 并发实时状态。"""
+    state = check_daily_budget()
+    state["sse_in_flight"] = in_flight_count()
+    state["sse_max_concurrency"] = SSE_MAX_CONCURRENCY
+    return state
