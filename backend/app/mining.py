@@ -21,6 +21,11 @@ v0.6 升级（2026-05）：
 """
 from __future__ import annotations
 
+import asyncio
+import logging
+
+logger = logging.getLogger(__name__)
+
 # ---------- LLM 注入位约定 ---------------------------------------------------
 # chat.py 在 SSE 流式生成时，识别 [LLM_INJECT::tag::hint] 标记并替换为模型输出。
 # tag = 唯一标识（如 prior_art_a），hint = 对模型的简短提示。
@@ -64,22 +69,18 @@ def _examiner_checklist(section_zh: str) -> str:
 </details>"""
 
 
-def build_sections(ctx: dict) -> list[dict]:
-    title = ctx.get("title", "未命名项目")
-    domain = (
-        ctx.get("customDomain")
-        or _DOMAIN_LABEL.get(ctx.get("domain", ""), ctx.get("domain", "其他"))
-    )
-    desc = (ctx.get("description") or "").strip()
-    desc_safe = desc or "（用户报门时未填写描述，需在对话中补充）"
-    stage = (ctx.get("intake") or {}).get("stage", "idea")
-    stage_label = _STAGE_LABEL.get(stage, stage)
+def build_prior_art_section_legacy(
+    title: str,
+    domain: str,
+    desc_safe: str,
+) -> dict:
+    """v0.18-B 抽出：mining.py 老路径 prior_art（01-背景技术.md）章节构造。
 
-    return [
-        # ===== 一、背景技术 ===========================================
-        {
-            "name": "01-背景技术.md", "phase": "auto",
-            "content": f"""# 一、背景技术
+    保留原逻辑不变，纯重构。供 build_sections 与 build_prior_art_section_smart 复用。
+    """
+    return {
+        "name": "01-背景技术.md", "phase": "auto",
+        "content": f"""# 一、背景技术
 
 > **PGTree 节点目标**：客观铺陈技术领域全景与最相近的现有方案，**不贬损**、不下结论；
 > 为第二节"缺点"和第三节"问题"做事实铺垫。
@@ -109,7 +110,133 @@ def build_sections(ctx: dict) -> list[dict]:
 ---
 {_examiner_checklist("背景技术")}
 """,
-        },
+    }
+
+
+async def build_prior_art_section_smart(
+    idea_text: str,
+    project_id: str | None = None,
+    *,
+    prefer_agent: bool = True,
+    title: str = "未命名项目",
+    domain: str = "其他",
+    desc_safe: str = "",
+    timeout: float = 30.0,
+) -> dict:
+    """v0.18-B：prior_art 章节生成 — 优先 agent，失败 fallback legacy。
+
+    fallback 触发条件（任一即触发）：
+        1) agent 流出现 type=='error' 事件
+        2) agent 整体超时（默认 30s）
+        3) agent 调用抛异常（含 import 失败等）
+    """
+    legacy = lambda: build_prior_art_section_legacy(title, domain, desc_safe)
+
+    if not prefer_agent:
+        return legacy()
+
+    try:
+        from . import agent_section_demo  # 延迟 import 避免环依赖
+    except Exception as exc:  # noqa: BLE001
+        logger.info("prior_art smart: agent failed, using legacy: import-failed %s", exc)
+        return legacy()
+
+    async def _run() -> dict:
+        text_parts: list[str] = []
+        async for ev in agent_section_demo.mine_section_via_agent(
+            "prior_art",
+            {
+                "idea_text": idea_text,
+                "title": title,
+                "domain": domain,
+                "project_id": project_id,
+            },
+        ):
+            etype = ev.get("type")
+            if etype == "error":
+                raise RuntimeError(f"agent error event: {ev.get('message','?')}")
+            if etype == "delta":
+                text_parts.append(ev.get("text", ""))
+        md = "".join(text_parts).strip()
+        if not md:
+            raise RuntimeError("agent produced empty markdown")
+        return {"name": "01-背景技术.md", "phase": "auto", "content": md}
+
+    try:
+        result = await asyncio.wait_for(_run(), timeout=timeout)
+        logger.info("prior_art smart: agent ok (project_id=%s)", project_id)
+        return result
+    except asyncio.TimeoutError:
+        logger.info("prior_art smart: agent failed, using legacy: timeout>%.0fs", timeout)
+        return legacy()
+    except Exception as exc:  # noqa: BLE001
+        logger.info("prior_art smart: agent failed, using legacy: %s", exc)
+        return legacy()
+
+
+def _build_prior_art_section_dispatch(
+    title: str, domain: str, desc_safe: str, project_id: str | None,
+) -> dict:
+    """同步入口：根据 settings.agent_prior_art 选择 smart 或 legacy。
+
+    在已有 event loop 中（如 FastAPI async 路由）需 await，但 build_sections
+    本身是同步契约；这里用 asyncio.run/get_event_loop fallback 安全调度。
+    """
+    from .config import settings
+
+    if not settings.agent_prior_art:
+        return build_prior_art_section_legacy(title, domain, desc_safe)
+
+    idea_text = desc_safe if desc_safe and "未填写描述" not in desc_safe else title
+
+    coro = build_prior_art_section_smart(
+        idea_text=idea_text,
+        project_id=project_id,
+        prefer_agent=True,
+        title=title,
+        domain=domain,
+        desc_safe=desc_safe,
+    )
+
+    try:
+        loop = asyncio.get_event_loop()
+        running = loop.is_running()
+    except RuntimeError:
+        loop = None
+        running = False
+
+    if running:
+        # 已在事件循环里（FastAPI 路由）：用线程跑独立 loop，避免阻塞
+        import concurrent.futures
+
+        def _runner() -> dict:
+            return asyncio.run(coro)
+
+        with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
+            return pool.submit(_runner).result()
+    else:
+        return asyncio.run(coro)
+
+
+def build_sections(ctx: dict) -> list[dict]:
+    title = ctx.get("title", "未命名项目")
+    domain = (
+        ctx.get("customDomain")
+        or _DOMAIN_LABEL.get(ctx.get("domain", ""), ctx.get("domain", "其他"))
+    )
+    desc = (ctx.get("description") or "").strip()
+    desc_safe = desc or "（用户报门时未填写描述，需在对话中补充）"
+    stage = (ctx.get("intake") or {}).get("stage", "idea")
+    stage_label = _STAGE_LABEL.get(stage, stage)
+    project_id = ctx.get("project_id") or ctx.get("projectId")
+
+    prior_art_section = _build_prior_art_section_dispatch(
+        title=title, domain=domain, desc_safe=desc_safe, project_id=project_id,
+    )
+
+    return [
+        # ===== 一、背景技术 ===========================================
+        prior_art_section,
 
         # ===== 二、现有技术缺点 =======================================
         {

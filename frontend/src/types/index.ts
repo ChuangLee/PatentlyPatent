@@ -38,11 +38,22 @@ export interface User {
   avatar?: string;
 }
 
+// v0.18-C: 结构化消息类型，'text' 是默认（兼容历史数据）
+export type ChatMessageType = 'text' | 'tool_call' | 'thinking' | 'error';
+
 export interface ChatMessage {
   id: string;
   role: 'agent' | 'user';
   content: string;
   ts: string;
+  type?: ChatMessageType;            // 默认 'text'，老数据无此字段
+  tool?: {
+    name: string;
+    input: unknown;
+    id?: string;
+    result?: string;
+    data?: unknown;
+  };
   meta?: {
     stage?: '5why' | 'whatif' | 'generalize' | 'effect';
     capturedFields?: string[];

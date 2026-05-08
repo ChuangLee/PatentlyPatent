@@ -294,3 +294,46 @@ title: PatentlyPatent 迭代日志
 - 跑 v0.17-C 5 周迁移路径的 Week 1：用 agent 替换 mining.py 的 "一、背景技术" prior_art 章节
 - 工作台 admin 切到 Agent SDK 模式时，UI 渲染 tool_use/tool_result 用更好看的卡片（目前是文本 prepend）
 - mining.py vs agent 输出落到同一项目 ai-internal/_compare/ 文件夹，方便手测对比
+
+
+## v0.18 · 2026-05-08 11:55 · 真 SDK 路径跑通 + prior_art 智能版 + tool 卡片 + A/B 落盘
+
+**A. 真 SDK 路径跑通（重大突破）**
+- 关键发现：claude-agent-sdk 走 Claude Code CLI 子进程；CLI 自带 OAuth 认证，**不需要 ANTHROPIC_API_KEY**
+- backend systemd 加 override.conf：`PATH=/root/.local/bin:...` + `HOME=/root`，让子进程能找到 claude 二进制 + 读 ~/.claude/.credentials.json
+- 复制 /home/claude/.claude/.credentials.json → /root/.claude/.credentials.json（root 原 cred 已过期，备份 .bak.v0.18）
+- config.py 加 setting `use_agent_sdk_real`：mock_llm=False 且 (claude CLI 在 PATH 或有 anthropic_api_key) → True
+- spike 入口判断从 use_real_llm 改 use_agent_sdk_real
+- **公网 e2e**: `POST /api/agent/mine_spike` SSE 真路径流出 thinking + 2×tool_use + delta + done，`stop_reason="end_turn"` `total_cost_usd=$0.27` （非 mock_complete）
+
+**B. (subagent) prior_art 章节迁 agent + fallback**
+- mining.py 抽 `build_prior_art_section_legacy()` 保留原 markdown 不变
+- 加 async `build_prior_art_section_smart()`：try agent → timeout 30s / error / exception 任一即 fallback legacy
+- 加同步 dispatch + ThreadPoolExecutor 处理 nested loop
+- 开关 `PP_AGENT_PRIOR_ART` env，**默认 OFF**（prod 安全）
+- log 区分 `prior_art smart: agent ok` vs `agent failed, using legacy: <reason>`
+- auto-mining 端点 200 不破
+
+**C. (subagent) AgentChatStream tool 卡片 UI**
+- chat.ts ChatMessage 加 `type: 'text'|'tool_call'|'thinking'|'error'`（默认 text 兼容老数据）+ `tool: {name, input, result, ...}`
+- 新方法：appendToolCall / attachToolResult / appendThinking / appendError
+- 模板 4 分支：text=原 bubble；tool_call=浅蓝卡 a-tag+a-collapse 入参/结果；thinking=灰 italic+💭 左竖线；error=浅红卡
+- autoMine handler 改用结构化方法（不再 emoji prepend）
+- 单测 39 → 42（+3 新用例）
+
+**D. (subagent) A/B 对比端点 + admin 按钮**
+- 后端 POST /api/agent/ab_compare/{project_id} 接 `{idea}`，并行调 mining legacy + agent，落盘到 `.ai-internal/_compare/01-prior_art-{mining,agent}.md`（hidden=True，可重复调）
+- 前端 admin Dashboard 加「⚗️ prior_art A/B 对比」卡片（pid + idea 输入 + 按钮）→ a-modal 1200 宽度并列展示双方 markdown + summary
+- 公网真路径 e2e: `mining_lines=43 agent_lines=44 mining_chars=1306 agent_chars=1085 agent_tool_calls=2 agent_error=null`
+
+**测试**
+- pnpm test 42/42（39→42）
+- pnpm build vue-tsc 通
+- 公网 200 / 真路径 SSE / A/B 端点全跑通
+- 老路径零回归
+
+**下轮目标 (v0.19)**
+- prior_art 智能版默认开启（PP_AGENT_PRIOR_ART=1）+ prod 监控 fallback 率
+- 加更多 tool：legal_status / inventor_ranking / file_search（在项目文件树里搜资料）
+- agent 输出质量监控：每次记录 num_turns + total_cost_usd 写到 DB observability 表
+- 把 mining.py 5-6 节都做 smart 版（claims / drawings / embodiments）

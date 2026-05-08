@@ -41,6 +41,11 @@ class Settings(BaseModel):
     anthropic_light_model: str = os.environ.get("PP_LIGHT_MODEL", "claude-sonnet-4-6")
     mock_llm: bool = os.environ.get("PP_MOCK_LLM", "").lower() in ("1", "true", "yes")
 
+    # v0.18-B：prior_art 章节是否走 agent 智能版（失败 fallback 到 legacy）
+    agent_prior_art: bool = os.environ.get("PP_AGENT_PRIOR_ART", "").lower() in (
+        "1", "true", "yes",
+    )
+
     # 智慧芽
     zhihuiya_token: str = os.environ.get("ZHIHUIYA_TOKEN", "")
     zhihuiya_api_base: str = os.environ.get(
@@ -54,6 +59,16 @@ class Settings(BaseModel):
     @property
     def use_real_zhihuiya(self) -> bool:
         return bool(self.zhihuiya_token)
+
+    @property
+    def use_agent_sdk_real(self) -> bool:
+        """v0.18-A: agent SDK 不走直 API，走 claude CLI 子进程；
+        只要 claude 二进制可调，就能用 CLI 自身的 OAuth 认证；
+        ANTHROPIC_API_KEY 不是必须的。"""
+        if self.mock_llm:
+            return False
+        import shutil
+        return shutil.which("claude") is not None or bool(self.anthropic_api_key)
 
 
 settings = Settings()

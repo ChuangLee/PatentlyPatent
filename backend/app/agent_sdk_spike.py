@@ -526,7 +526,8 @@ async def agent_mine_stream(
         yield {"type": "error", "message": "idea 为空"}
         return
 
-    if not settings.use_real_llm:
+    # v0.18-A: 走 agent SDK 真路径只需 claude CLI（OAuth 认证），不强求 ANTHROPIC_API_KEY
+    if not settings.use_agent_sdk_real:
         async for ev in _stream_mock(idea_text):
             yield ev
         return

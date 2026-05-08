@@ -43,7 +43,8 @@ export const useChatStore = defineStore('chat', () => {
     projectId.value = pid;
     const cached = load(pid);
     if (cached) {
-      messages.value = cached.messages;
+      // v0.18-C 兼容：老数据无 type 字段，回填 'text'
+      messages.value = cached.messages.map(m => ({ ...m, type: m.type ?? 'text' }));
       capturedFields.value = cached.capturedFields ?? [];
     } else {
       messages.value = [];
@@ -58,6 +59,7 @@ export const useChatStore = defineStore('chat', () => {
       role: 'user',
       content,
       ts: new Date().toISOString(),
+      type: 'text',
     });
     persist();
   }
@@ -68,18 +70,74 @@ export const useChatStore = defineStore('chat', () => {
       role: 'agent',
       content: '',
       ts: new Date().toISOString(),
+      type: 'text',
     });
     streaming.value = true;
     // 流式中的空消息也持久化骨架，便于刷新看到上下文
     persist();
   }
 
+  /** appendDelta 只追加到最近一条 type=text 的 agent 消息（跳过 tool_call/thinking 卡片） */
   function appendDelta(chunk: string) {
-    const last = messages.value[messages.value.length - 1];
-    if (last && last.role === 'agent') {
-      last.content += chunk;
-      // 不在每个 delta 都写入（高频）；交由 endAgent 统一 persist
+    for (let i = messages.value.length - 1; i >= 0; i--) {
+      const m = messages.value[i];
+      if (m.role === 'agent' && (m.type ?? 'text') === 'text') {
+        m.content += chunk;
+        return;
+      }
+      // 若中间夹了 tool_call/thinking 卡片就继续往上找最近的 text agent
     }
+  }
+
+  /** v0.18-C: 推一条结构化 tool_call 消息 */
+  function appendToolCall(name: string, input: unknown, id?: string) {
+    messages.value.push({
+      id: `m-${Date.now()}-tc-${Math.random().toString(36).slice(2, 6)}`,
+      role: 'agent',
+      content: '',
+      ts: new Date().toISOString(),
+      type: 'tool_call',
+      tool: { name, input, id },
+    });
+    persist();
+  }
+
+  /** v0.18-C: 把 tool_result 挂到最近一条无 result 的 tool_call 上 */
+  function attachToolResult(text: string, data?: unknown) {
+    for (let i = messages.value.length - 1; i >= 0; i--) {
+      const m = messages.value[i];
+      if (m.type === 'tool_call' && m.tool && m.tool.result == null) {
+        m.tool.result = text;
+        if (data !== undefined) m.tool.data = data;
+        persist();
+        return;
+      }
+    }
+    // 找不到就忽略（结构异常时不炸）
+  }
+
+  /** v0.18-C: 推一条 thinking 消息（agent 角色，独立卡片渲染） */
+  function appendThinking(text: string) {
+    messages.value.push({
+      id: `m-${Date.now()}-th-${Math.random().toString(36).slice(2, 6)}`,
+      role: 'agent',
+      content: text,
+      ts: new Date().toISOString(),
+      type: 'thinking',
+    });
+    persist();
+  }
+
+  /** v0.18-C: 推一条 error 消息卡片 */
+  function appendError(message: string) {
+    messages.value.push({
+      id: `m-${Date.now()}-er-${Math.random().toString(36).slice(2, 6)}`,
+      role: 'agent',
+      content: message,
+      ts: new Date().toISOString(),
+      type: 'error',
+    });
+    persist();
   }
 
   function applyFields(captured: string[]) {
@@ -102,5 +160,7 @@ export const useChatStore = defineStore('chat', () => {
   return {
     projectId, messages, streaming, capturedFields,
     attach, appendUser, startAgent, appendDelta, applyFields, endAgent, reset,
+    // v0.18-C 结构化卡片
+    appendToolCall, attachToolResult, appendThinking, appendError,
   };
 });

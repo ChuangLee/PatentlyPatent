@@ -76,6 +76,43 @@ describe('useChatStore', () => {
     expect(b.streaming).toBe(false); // 不持久化 streaming
   });
 
+  // v0.18-C 结构化卡片
+  it('appendToolCall + attachToolResult 把 result 挂到最近 tool_call', () => {
+    const s = useChatStore();
+    s.appendToolCall('search_patents', { kw: 'AI' }, 'tu_1');
+    expect(s.messages).toHaveLength(1);
+    expect(s.messages[0].type).toBe('tool_call');
+    expect(s.messages[0].tool?.name).toBe('search_patents');
+    expect(s.messages[0].tool?.result).toBeUndefined();
+
+    s.attachToolResult('found 3 hits', { hits: 3 });
+    expect(s.messages[0].tool?.result).toBe('found 3 hits');
+    expect(s.messages[0].tool?.data).toEqual({ hits: 3 });
+  });
+
+  it('appendThinking / appendError 推独立卡片消息', () => {
+    const s = useChatStore();
+    s.appendThinking('想想看…');
+    s.appendError('boom');
+    expect(s.messages).toHaveLength(2);
+    expect(s.messages[0].type).toBe('thinking');
+    expect(s.messages[0].content).toBe('想想看…');
+    expect(s.messages[1].type).toBe('error');
+    expect(s.messages[1].content).toBe('boom');
+  });
+
+  it('attach 老数据无 type 字段 → 兜底 text', () => {
+    sessionStorage.clear();
+    sessionStorage.setItem('pp.chat.p-legacy', JSON.stringify({
+      messages: [{ id: 'm1', role: 'user', content: 'old', ts: '2024-01-01' }],
+      capturedFields: [],
+    }));
+    const s = useChatStore();
+    s.attach('p-legacy');
+    expect(s.messages[0].type).toBe('text');
+    expect(s.messages[0].content).toBe('old');
+  });
+
   it('attach 不同 projectId 隔离', () => {
     sessionStorage.clear();
     const a = useChatStore();
