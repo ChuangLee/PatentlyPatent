@@ -218,6 +218,274 @@ def _build_prior_art_section_dispatch(
         return asyncio.run(coro)
 
 
+def build_embodiments_section_legacy(stage_label: str) -> dict:
+    """v0.19-C 抽出：04-技术方案.md（embodiments）老路径构造。markdown 不改。"""
+    return {
+        "name": "04-技术方案.md", "phase": "auto",
+        "content": f"""# 四、技术方案的详细阐述
+
+> **PGTree 节点目标**：交底书的核心。本节按 AutoPatent 的 RRAG 范式拆为
+> 4 个 subsection（总览 / 模块 / 流程 / 参数），每个 subsection 独立注入 + 自检。
+> 当前阶段：**{stage_label}**
+
+---
+
+## Subsection 1：总体方案概述（System Overview）
+
+> 心法：先给"一句话方案"，再给"一段话方案"，最后给"一张图方案"。
+> 三档颗粒度让审查员、代理人、PM 都能快速 get 到。
+
+**一句话方案**：{_inject("scheme_oneline", "≤30 字，主谓宾齐全，含核心手段名")}
+
+**一段话方案**（150-200 字）：
+{_inject("scheme_paragraph", "覆盖：输入 / 关键步骤 / 输出 / 与现有技术的差异点")}
+
+**架构图占位**：
+```
+[请上传架构图到左侧"我的资料/"。AI 会自动引用并生成附图说明。]
+```
+
+---
+
+## Subsection 2：核心模块拆解（Module Breakdown）
+
+> 每个模块给 4 要素：**职责 / 输入 / 输出 / 关键算法**。3-5 个模块为宜，过多说明耦合度高。
+
+### 模块 M1：{_inject("m1_name", "命名建议：动词+名词，如「自适应温度采样器」")}
+- **职责**：{_inject("m1_role", "1 句话")}
+- **输入**：{_inject("m1_in", "")}
+- **输出**：{_inject("m1_out", "")}
+- **关键算法 / 数据结构**：{_inject("m1_algo", "若是新算法，给伪代码 5-10 行")}
+
+### 模块 M2：{_inject("m2_name", "")}
+- **职责**：{_inject("m2_role", "")}
+- **输入**：{_inject("m2_in", "")}
+- **输出**：{_inject("m2_out", "")}
+- **关键算法 / 数据结构**：{_inject("m2_algo", "")}
+
+### 模块 M3：{_inject("m3_name", "")}
+- **职责**：{_inject("m3_role", "")}
+- **输入**：{_inject("m3_in", "")}
+- **输出**：{_inject("m3_out", "")}
+- **关键算法 / 数据结构**：{_inject("m3_algo", "")}
+
+---
+
+## Subsection 3：执行流程（Workflow / 时序）
+
+> 用「编号 + 输入→处理→输出」的形式，**每步可独立成为方法权要的一个 step**。
+
+1. **Step 1**：{_inject("step1", "动词开头，含输入与输出")}
+2. **Step 2**：{_inject("step2", "")}
+3. **Step 3**：{_inject("step3", "")}
+4. **Step 4**：{_inject("step4", "")}
+5. **Step 5（可选）**：{_inject("step5", "若不必要可写 N/A")}
+
+**异常 / 兜底分支**：{_inject("workflow_fallback", "列 1-2 个分支，便于从权布局")}
+
+---
+
+## Subsection 4：关键参数与阈值（Parameter Table）
+
+> 心法（v1 spec.py）：参数必须给**端点 + 优选值**，否则 A26.3 充分公开扛不住。
+
+| 参数 | 取值范围 | 优选值 | 物理含义 / 选取依据 |
+|---|---|---|---|
+| {_inject("p1_name", "")} | {_inject("p1_range", "")} | {_inject("p1_pref", "")} | {_inject("p1_why", "")} |
+| {_inject("p2_name", "")} | {_inject("p2_range", "")} | {_inject("p2_pref", "")} | {_inject("p2_why", "")} |
+| {_inject("p3_name", "")} | {_inject("p3_range", "")} | {_inject("p3_pref", "")} | {_inject("p3_why", "")} |
+
+## 附图清单（如有）
+{_inject("figures_list", "若用户已上传图，列「图1：xxx；图2：xxx」；否则列出建议补充的 3 张图")}
+
+---
+{_examiner_checklist("技术方案")}
+""",
+    }
+
+
+def build_claims_section_legacy() -> dict:
+    """v0.19-C 抽出：05-关键点.md（claims）老路径构造。markdown 不改。"""
+    return {
+        "name": "05-关键点.md", "phase": "auto",
+        "content": f"""# 五、本发明的关键点和欲保护点
+
+> **PGTree 节点目标**：把第四节的方案蒸馏成"创新点 → 上位/中位/下位"梯度，
+> 直接喂给后续 claims_indep / claims_dep 阶段。
+> 心法来自 v1 generalize.py + claims_indep.py。
+
+## 5.1 创新点清单
+> 一个独权对应一个创新点；一个创新点对应一个"必要技术特征最小集"（R20.2）。
+
+### 创新点 #1（核心）
+- **一句话**：{_inject("ip1_oneline", "动词开头，含手段+效果")}
+- **必要技术特征最小集**：{_inject("ip1_min_features", "5±1 条 bullet，每条都不可省")}
+- **支撑实施例**：{_inject("ip1_example", "对应第四节哪个模块/步骤")}
+
+### 创新点 #2（辅助）
+- **一句话**：{_inject("ip2_oneline", "")}
+- **必要技术特征最小集**：{_inject("ip2_min_features", "")}
+- **支撑实施例**：{_inject("ip2_example", "")}
+
+### 创新点 #3（防御 / 外围）
+- **一句话**：{_inject("ip3_oneline", "")}
+- **必要技术特征最小集**：{_inject("ip3_min_features", "")}
+
+## 5.2 三档概括度（独权种子，供撰写阶段挑选）
+> 来自 v1 claims_indep.py 的"3 档心法"：能撑多大撑多大，但边界是「现有技术 + 审查员合理质疑」。
+
+### 🟢 强档（aggressive）— 上位最激进
+- **概括描述**：{_inject("indep_strong", "技术特征 5±1，上位词激进")}
+- **风险标注**：{_inject("indep_strong_risk", "high / mid / low + 一句话理由（潜在 X 全/Y 缺新颖性 风险）")}
+
+### 🟡 中档（balanced）— 稳妥
+- **概括描述**：{_inject("indep_mid", "技术特征 7±2，中位")}
+- **风险标注**：{_inject("indep_mid_risk", "通常 mid")}
+
+### 🔴 弱档（conservative）— 紧贴实施例
+- **概括描述**：{_inject("indep_weak", "技术特征 9±2，下位")}
+- **风险标注**：{_inject("indep_weak_risk", "通常 low，但保护范围窄")}
+
+## 5.3 从权梯度种子（5 类）
+> 来自 v1 claims_dep.py：网状引用 + 失守 fallback。
+
+1. **进一步限定核心**：{_inject("dep_refine_core", "")}
+2. **可选附加特征**：{_inject("dep_optional", "")}
+3. **数值范围**（端点 + 优选值）：{_inject("dep_numeric", "对应第四节参数表")}
+4. **优选实施例**：{_inject("dep_preferred", "")}
+5. **解释性从权**（关键术语限缩）：{_inject("dep_explain", "便于将来无效时锚回实施例")}
+
+---
+{_examiner_checklist("关键点与欲保护点")}
+""",
+    }
+
+
+async def _build_section_smart_via_agent(
+    section: str,
+    section_name_md: str,
+    legacy_factory,
+    *,
+    idea_text: str,
+    title: str,
+    domain: str,
+    project_id: str | None,
+    timeout: float = 30.0,
+) -> dict:
+    """通用 smart 包装：调 agent_section_demo.mine_section_via_agent，失败 fallback。"""
+    try:
+        from . import agent_section_demo
+    except Exception as exc:  # noqa: BLE001
+        logger.info("%s smart: agent failed, using legacy: import-failed %s", section, exc)
+        return legacy_factory()
+
+    async def _run() -> dict:
+        text_parts: list[str] = []
+        async for ev in agent_section_demo.mine_section_via_agent(
+            section,
+            {
+                "idea_text": idea_text,
+                "title": title,
+                "domain": domain,
+                "project_id": project_id,
+            },
+        ):
+            etype = ev.get("type")
+            if etype == "error":
+                raise RuntimeError(f"agent error event: {ev.get('message','?')}")
+            if etype == "delta":
+                text_parts.append(ev.get("text", ""))
+        md = "".join(text_parts).strip()
+        if not md:
+            raise RuntimeError("agent produced empty markdown")
+        return {"name": section_name_md, "phase": "auto", "content": md}
+
+    try:
+        result = await asyncio.wait_for(_run(), timeout=timeout)
+        logger.info("%s smart: agent ok (project_id=%s)", section, project_id)
+        return result
+    except asyncio.TimeoutError:
+        logger.info("%s smart: agent failed, using legacy: timeout>%.0fs", section, timeout)
+        return legacy_factory()
+    except Exception as exc:  # noqa: BLE001
+        logger.info("%s smart: agent failed, using legacy: %s", section, exc)
+        return legacy_factory()
+
+
+def _run_coro_blocking(coro):
+    """同步入口运行 coroutine：在已有 event loop 时用线程池跑独立 loop。"""
+    try:
+        loop = asyncio.get_event_loop()
+        running = loop.is_running()
+    except RuntimeError:
+        running = False
+
+    if running:
+        import concurrent.futures
+
+        def _runner():
+            return asyncio.run(coro)
+
+        with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
+            return pool.submit(_runner).result()
+    return asyncio.run(coro)
+
+
+def _build_embodiments_section_dispatch(
+    stage_label: str,
+    *,
+    title: str,
+    domain: str,
+    desc_safe: str,
+    project_id: str | None,
+) -> dict:
+    """同步入口：env PP_AGENT_EMBODIMENTS / settings.agent_embodiments 切换。"""
+    from .config import settings
+
+    legacy_factory = lambda: build_embodiments_section_legacy(stage_label)
+    if not settings.agent_embodiments:
+        return legacy_factory()
+
+    idea_text = desc_safe if desc_safe and "未填写描述" not in desc_safe else title
+    coro = _build_section_smart_via_agent(
+        "embodiments",
+        "04-技术方案.md",
+        legacy_factory,
+        idea_text=idea_text,
+        title=title,
+        domain=domain,
+        project_id=project_id,
+    )
+    return _run_coro_blocking(coro)
+
+
+def _build_claims_section_dispatch(
+    *,
+    title: str,
+    domain: str,
+    desc_safe: str,
+    project_id: str | None,
+) -> dict:
+    """同步入口：env PP_AGENT_CLAIMS / settings.agent_claims 切换。"""
+    from .config import settings
+
+    legacy_factory = build_claims_section_legacy
+    if not settings.agent_claims:
+        return legacy_factory()
+
+    idea_text = desc_safe if desc_safe and "未填写描述" not in desc_safe else title
+    coro = _build_section_smart_via_agent(
+        "claims",
+        "05-关键点.md",
+        legacy_factory,
+        idea_text=idea_text,
+        title=title,
+        domain=domain,
+        project_id=project_id,
+    )
+    return _run_coro_blocking(coro)
+
+
 def build_sections(ctx: dict) -> list[dict]:
     title = ctx.get("title", "未命名项目")
     domain = (
@@ -231,6 +499,13 @@ def build_sections(ctx: dict) -> list[dict]:
     project_id = ctx.get("project_id") or ctx.get("projectId")
 
     prior_art_section = _build_prior_art_section_dispatch(
+        title=title, domain=domain, desc_safe=desc_safe, project_id=project_id,
+    )
+    embodiments_section = _build_embodiments_section_dispatch(
+        stage_label,
+        title=title, domain=domain, desc_safe=desc_safe, project_id=project_id,
+    )
+    claims_section = _build_claims_section_dispatch(
         title=title, domain=domain, desc_safe=desc_safe, project_id=project_id,
     )
 
@@ -322,143 +597,10 @@ def build_sections(ctx: dict) -> list[dict]:
         },
 
         # ===== 四、技术方案 ==========================================
-        {
-            "name": "04-技术方案.md", "phase": "auto",
-            "content": f"""# 四、技术方案的详细阐述
-
-> **PGTree 节点目标**：交底书的核心。本节按 AutoPatent 的 RRAG 范式拆为
-> 4 个 subsection（总览 / 模块 / 流程 / 参数），每个 subsection 独立注入 + 自检。
-> 当前阶段：**{stage_label}**
-
----
-
-## Subsection 1：总体方案概述（System Overview）
-
-> 心法：先给"一句话方案"，再给"一段话方案"，最后给"一张图方案"。
-> 三档颗粒度让审查员、代理人、PM 都能快速 get 到。
-
-**一句话方案**：{_inject("scheme_oneline", "≤30 字，主谓宾齐全，含核心手段名")}
-
-**一段话方案**（150-200 字）：
-{_inject("scheme_paragraph", "覆盖：输入 / 关键步骤 / 输出 / 与现有技术的差异点")}
-
-**架构图占位**：
-```
-[请上传架构图到左侧"我的资料/"。AI 会自动引用并生成附图说明。]
-```
-
----
-
-## Subsection 2：核心模块拆解（Module Breakdown）
-
-> 每个模块给 4 要素：**职责 / 输入 / 输出 / 关键算法**。3-5 个模块为宜，过多说明耦合度高。
-
-### 模块 M1：{_inject("m1_name", "命名建议：动词+名词，如「自适应温度采样器」")}
-- **职责**：{_inject("m1_role", "1 句话")}
-- **输入**：{_inject("m1_in", "")}
-- **输出**：{_inject("m1_out", "")}
-- **关键算法 / 数据结构**：{_inject("m1_algo", "若是新算法，给伪代码 5-10 行")}
-
-### 模块 M2：{_inject("m2_name", "")}
-- **职责**：{_inject("m2_role", "")}
-- **输入**：{_inject("m2_in", "")}
-- **输出**：{_inject("m2_out", "")}
-- **关键算法 / 数据结构**：{_inject("m2_algo", "")}
-
-### 模块 M3：{_inject("m3_name", "")}
-- **职责**：{_inject("m3_role", "")}
-- **输入**：{_inject("m3_in", "")}
-- **输出**：{_inject("m3_out", "")}
-- **关键算法 / 数据结构**：{_inject("m3_algo", "")}
-
----
-
-## Subsection 3：执行流程（Workflow / 时序）
-
-> 用「编号 + 输入→处理→输出」的形式，**每步可独立成为方法权要的一个 step**。
-
-1. **Step 1**：{_inject("step1", "动词开头，含输入与输出")}
-2. **Step 2**：{_inject("step2", "")}
-3. **Step 3**：{_inject("step3", "")}
-4. **Step 4**：{_inject("step4", "")}
-5. **Step 5（可选）**：{_inject("step5", "若不必要可写 N/A")}
-
-**异常 / 兜底分支**：{_inject("workflow_fallback", "列 1-2 个分支，便于从权布局")}
-
----
-
-## Subsection 4：关键参数与阈值（Parameter Table）
-
-> 心法（v1 spec.py）：参数必须给**端点 + 优选值**，否则 A26.3 充分公开扛不住。
-
-| 参数 | 取值范围 | 优选值 | 物理含义 / 选取依据 |
-|---|---|---|---|
-| {_inject("p1_name", "")} | {_inject("p1_range", "")} | {_inject("p1_pref", "")} | {_inject("p1_why", "")} |
-| {_inject("p2_name", "")} | {_inject("p2_range", "")} | {_inject("p2_pref", "")} | {_inject("p2_why", "")} |
-| {_inject("p3_name", "")} | {_inject("p3_range", "")} | {_inject("p3_pref", "")} | {_inject("p3_why", "")} |
-
-## 附图清单（如有）
-{_inject("figures_list", "若用户已上传图，列「图1：xxx；图2：xxx」；否则列出建议补充的 3 张图")}
-
----
-{_examiner_checklist("技术方案")}
-""",
-        },
+        embodiments_section,
 
         # ===== 五、关键点与欲保护点（含三档独权种子）==================
-        {
-            "name": "05-关键点.md", "phase": "auto",
-            "content": f"""# 五、本发明的关键点和欲保护点
-
-> **PGTree 节点目标**：把第四节的方案蒸馏成"创新点 → 上位/中位/下位"梯度，
-> 直接喂给后续 claims_indep / claims_dep 阶段。
-> 心法来自 v1 generalize.py + claims_indep.py。
-
-## 5.1 创新点清单
-> 一个独权对应一个创新点；一个创新点对应一个"必要技术特征最小集"（R20.2）。
-
-### 创新点 #1（核心）
-- **一句话**：{_inject("ip1_oneline", "动词开头，含手段+效果")}
-- **必要技术特征最小集**：{_inject("ip1_min_features", "5±1 条 bullet，每条都不可省")}
-- **支撑实施例**：{_inject("ip1_example", "对应第四节哪个模块/步骤")}
-
-### 创新点 #2（辅助）
-- **一句话**：{_inject("ip2_oneline", "")}
-- **必要技术特征最小集**：{_inject("ip2_min_features", "")}
-- **支撑实施例**：{_inject("ip2_example", "")}
-
-### 创新点 #3（防御 / 外围）
-- **一句话**：{_inject("ip3_oneline", "")}
-- **必要技术特征最小集**：{_inject("ip3_min_features", "")}
-
-## 5.2 三档概括度（独权种子，供撰写阶段挑选）
-> 来自 v1 claims_indep.py 的"3 档心法"：能撑多大撑多大，但边界是「现有技术 + 审查员合理质疑」。
-
-### 🟢 强档（aggressive）— 上位最激进
-- **概括描述**：{_inject("indep_strong", "技术特征 5±1，上位词激进")}
-- **风险标注**：{_inject("indep_strong_risk", "high / mid / low + 一句话理由（潜在 X 全/Y 缺新颖性 风险）")}
-
-### 🟡 中档（balanced）— 稳妥
-- **概括描述**：{_inject("indep_mid", "技术特征 7±2，中位")}
-- **风险标注**：{_inject("indep_mid_risk", "通常 mid")}
-
-### 🔴 弱档（conservative）— 紧贴实施例
-- **概括描述**：{_inject("indep_weak", "技术特征 9±2，下位")}
-- **风险标注**：{_inject("indep_weak_risk", "通常 low，但保护范围窄")}
-
-## 5.3 从权梯度种子（5 类）
-> 来自 v1 claims_dep.py：网状引用 + 失守 fallback。
-
-1. **进一步限定核心**：{_inject("dep_refine_core", "")}
-2. **可选附加特征**：{_inject("dep_optional", "")}
-3. **数值范围**（端点 + 优选值）：{_inject("dep_numeric", "对应第四节参数表")}
-4. **优选实施例**：{_inject("dep_preferred", "")}
-5. **解释性从权**（关键术语限缩）：{_inject("dep_explain", "便于将来无效时锚回实施例")}
-
----
-{_examiner_checklist("关键点与欲保护点")}
-""",
-        },
+        claims_section,
 
         # ===== 六、相比现有技术的优点（多维效果矩阵）==================
         {

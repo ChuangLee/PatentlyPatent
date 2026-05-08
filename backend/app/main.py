@@ -15,6 +15,7 @@ from .routes import chat as r_chat
 from .routes import search as r_search
 from .routes import disclosure as r_disclosure
 from .routes import agent as r_agent
+from .routes import admin as r_admin
 from . import agent_sdk_spike
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
@@ -54,6 +55,7 @@ app.include_router(r_chat.router, prefix=settings.api_prefix)
 app.include_router(r_search.router, prefix=settings.api_prefix)
 app.include_router(r_disclosure.router, prefix=settings.api_prefix)
 app.include_router(r_agent.router, prefix=settings.api_prefix)
+app.include_router(r_admin.router, prefix=settings.api_prefix)
 
 
 @app.get("/api/ping")

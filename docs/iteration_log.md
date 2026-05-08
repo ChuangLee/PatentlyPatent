@@ -337,3 +337,44 @@ title: PatentlyPatent 迭代日志
 - 加更多 tool：legal_status / inventor_ranking / file_search（在项目文件树里搜资料）
 - agent 输出质量监控：每次记录 num_turns + total_cost_usd 写到 DB observability 表
 - 把 mining.py 5-6 节都做 smart 版（claims / drawings / embodiments）
+
+
+## v0.19 · 2026-05-08 13:00 · prior_art 默认 ON + 7 tools + 多 section smart + observability
+
+**A. (我做) prior_art 默认 ON + N 次回归监控**
+- systemd override 加 `Environment=PP_AGENT_PRIOR_ART=1` ; daemon-reload + restart
+- admin Dashboard 加「🔁 N 次回归」按钮（默认 5 次，1-20 可调）+ a-input-number ; 跑完显示 fallback 率，>30% red alert
+- 公网 3 次回归探针：ab_compare 全 ok，agent_error=None
+
+**B. (subagent) 4 → 7 tools**
+- legal_status（包 zhihuiya.simple_legal_status，三档计数文本）
+- inventor_ranking（包 zhihuiya.inventor_ranking，top 10 归一化）
+- file_search_in_project（asyncio.to_thread + LIKE %kw% AND kind='file'，前后 80 字 snippet）
+- mock 流扩展含两个新 tool 演示
+- system_prompt 同步加 legal_status / inventor_ranking / file_search_in_project 角色提示
+
+**C. (subagent) embodiments + claims 章节 smart 版**
+- mining.py 抽 `build_embodiments_section_legacy(stage_label)` + `build_claims_section_legacy()`（markdown 字面量原样保留）
+- 加 async smart 版 + 同步 dispatch（ThreadPoolExecutor 跑 asyncio.run 抹 nested loop）
+- 抽通用 `_build_section_smart_via_agent` / `_run_coro_blocking` helper（v0.18-B prior_art 也复用）
+- env `PP_AGENT_EMBODIMENTS` / `PP_AGENT_CLAIMS`，默认 OFF（prod 安全）
+- agent_section_demo._SECTION_PROMPTS 加 embodiments（≥2 个 embodiment / 步骤 / 优选值，禁瞎编实验）+ claims（broad/medium/narrow + 必要技术特征最小集 + 风险）
+
+**D. (subagent) AgentRunLog observability 表**
+- models.py 加 AgentRunLog（id/endpoint/project_id/idea/num_turns/total_cost_usd/duration_ms/stop_reason/fallback_used/error/is_mock/created_at）
+- init_db() Base.metadata.create_all 自动建表，幂等
+- spike agent_mine_stream() finally 块嗅探 done/error 事件 → asyncio.to_thread 包写一行 ; try/except + logger.warning 兜住，监控不阻塞业务
+- ab_compare agent 路径独立 SessionLocal 写一行（mining 不写）
+- 新增 `routes/admin.py` GET /api/admin/agent_runs?limit=N，desc 排序最近 N 行
+
+**测试**
+- pnpm test 42/42 / pnpm build 通
+- backend systemctl restart 后 PP_AGENT_PRIOR_ART=1 已生效
+- 公网 5 次 mine_spike + 3 次 ab_compare 探针 → agent_runs 返 8 行 (mine_spike: num_turns=1 / cost ≈ $0.034 / is_mock=False / fallback=False ; ab_compare: num_turns/cost None 因 agent_section_demo 未透传 done meta，下轮修)
+- fallback_rate=0% 真路径稳定
+
+**下轮目标 (v0.20)**
+- ab_compare 写日志补 num_turns/cost（从 agent_section_demo done 事件透传）
+- admin Dashboard 加 agent_runs 列表视图（time series 图 / fallback 趋势 / cost 累计）
+- 把 mining.py 余下 sections（drawings_description / summary）也做 smart 版，凑齐 5 节
+- agent prior_art 用 prompt cache（Anthropic prompt caching）— SDK 怎么开 cache 调研

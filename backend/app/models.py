@@ -1,7 +1,8 @@
 """ORM 模型 — 与前端 types/index.ts 对齐"""
 from __future__ import annotations
 from datetime import datetime, timezone
-from sqlalchemy import String, Integer, DateTime, ForeignKey, JSON, Boolean
+from typing import Optional
+from sqlalchemy import String, Integer, DateTime, ForeignKey, JSON, Boolean, Float, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from .db import Base
@@ -60,3 +61,26 @@ class FileNode(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now, onupdate=_now)
 
     project: Mapped["Project"] = relationship(back_populates="files")
+
+
+class AgentRunLog(Base):
+    """v0.19: agent 调用 observability 日志表。
+    每次跑 agent 入口（mine_spike / ab_compare / prior_art_smart 等）写一行。
+    监控失败绝不阻塞业务（写入由调用方 try/except 兜住）。
+    """
+    __tablename__ = "agent_run_logs"
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    endpoint: Mapped[str] = mapped_column(String(64))
+    project_id: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    idea: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    num_turns: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    total_cost_usd: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    duration_ms: Mapped[int] = mapped_column(Integer)
+    stop_reason: Mapped[Optional[str]] = mapped_column(String(32), nullable=True)
+    fallback_used: Mapped[bool] = mapped_column(Boolean, default=False)
+    error: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    is_mock: Mapped[bool] = mapped_column(Boolean, default=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(timezone.utc),
+    )

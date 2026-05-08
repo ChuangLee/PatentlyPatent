@@ -86,6 +86,53 @@ const abLoading = ref(false);
 const abModalOpen = ref(false);
 const abResult = ref<AbCompareResp | null>(null);
 
+// v0.19-A: 一键 N 次回归
+const regressionN = ref(5);
+const regressionLoading = ref(false);
+const regressionStats = ref<{
+  total: number; ok: number; agent_error: number;
+  avg_agent_chars: number; avg_mining_chars: number; avg_tool_calls: number;
+  fallback_rate: number;
+} | null>(null);
+
+async function runRegression() {
+  const pid = abPid.value.trim();
+  if (!pid) { message.warning('请输入项目 id'); return; }
+  const idea = abIdea.value.trim() || '回归测试';
+  const n = Math.max(1, Math.min(20, regressionN.value || 5));
+  regressionLoading.value = true;
+  regressionStats.value = null;
+  try {
+    const results: AbCompareResp[] = [];
+    for (let i = 0; i < n; i++) {
+      try {
+        const r = await apiClient.post<AbCompareResp>(
+          `/agent/ab_compare/${pid}`,
+          { idea: `${idea} (回归 ${i + 1}/${n})` },
+          { timeout: 90000 },
+        );
+        results.push(r.data);
+      } catch { /* 单次失败计入 fallback */ }
+    }
+    const ok = results.filter(r => !r.summary.agent_error).length;
+    const fallbacks = n - ok;
+    regressionStats.value = {
+      total: n, ok, agent_error: fallbacks,
+      avg_agent_chars: Math.round(results.reduce((s, r) => s + r.summary.agent_chars, 0) / Math.max(results.length, 1)),
+      avg_mining_chars: Math.round(results.reduce((s, r) => s + r.summary.mining_chars, 0) / Math.max(results.length, 1)),
+      avg_tool_calls: +(results.reduce((s, r) => s + r.summary.agent_tool_calls, 0) / Math.max(results.length, 1)).toFixed(1),
+      fallback_rate: +(fallbacks / n * 100).toFixed(1),
+    };
+    if (fallbacks / n > 0.3) {
+      message.error(`fallback 率 ${regressionStats.value.fallback_rate}% > 30% 警戒线，建议关回 PP_AGENT_PRIOR_ART`);
+    } else {
+      message.success(`回归 ${n} 次完成，fallback ${regressionStats.value.fallback_rate}%`);
+    }
+  } finally {
+    regressionLoading.value = false;
+  }
+}
+
 async function runAbCompare() {
   const pid = abPid.value.trim();
   if (!pid) { message.warning('请输入项目 id'); return; }
@@ -151,17 +198,36 @@ async function runAbCompare() {
     </a-col>
   </a-row>
 
-  <!-- v0.18-D: prior_art A/B 对比落盘工具 -->
+  <!-- v0.18-D + v0.19-A: prior_art A/B 对比 + N 次回归 -->
   <a-card style="margin-top:16px" title="⚗️ prior_art A/B 对比（mining 老路径 vs agent 路径）">
     <a-space wrap>
       <a-input v-model:value="abPid" placeholder="项目 id (如 p-xxxxxxxx)" style="width:240px" />
       <a-input v-model:value="abIdea" placeholder="idea 文本" style="width:360px" />
       <a-button type="primary" :loading="abLoading" @click="runAbCompare">
-        ⚗️ 跑 prior_art A/B 对比
+        ⚗️ 单次 A/B
+      </a-button>
+      <a-input-number v-model:value="regressionN" :min="1" :max="20" style="width:90px" />
+      <a-button :loading="regressionLoading" @click="runRegression">
+        🔁 N 次回归
       </a-button>
     </a-space>
     <div style="margin-top:8px;color:#999;font-size:12px">
-      点击后并行落盘到该项目的 .ai-internal/_compare/ 下两个文件（hidden=True，前端文件树不展示）。
+      单次：落盘到该项目 .ai-internal/_compare/。N 次回归：连续跑统计 fallback 率（>30% 警戒）。
+    </div>
+    <div v-if="regressionStats" style="margin-top:12px">
+      <a-alert
+        :type="regressionStats.fallback_rate > 30 ? 'error' : (regressionStats.fallback_rate > 10 ? 'warning' : 'success')"
+        show-icon>
+        <template #message>
+          回归 {{ regressionStats.total }} 次：成功 {{ regressionStats.ok }} / fallback {{ regressionStats.agent_error }}
+          ({{ regressionStats.fallback_rate }}%)
+        </template>
+        <template #description>
+          avg agent_chars={{ regressionStats.avg_agent_chars }} ·
+          mining_chars={{ regressionStats.avg_mining_chars }} ·
+          tool_calls={{ regressionStats.avg_tool_calls }}
+        </template>
+      </a-alert>
     </div>
   </a-card>
 

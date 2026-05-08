@@ -13,6 +13,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import time
 import uuid
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -22,9 +23,10 @@ from sse_starlette.sse import EventSourceResponse
 
 from ..agent_sdk_spike import agent_mine_stream
 from ..agent_section_demo import mine_section_via_agent
-from ..db import get_db
+from ..config import settings
+from ..db import SessionLocal, get_db
 from ..mining import build_prior_art_section_legacy, _DOMAIN_LABEL
-from ..models import FileNode, Project
+from ..models import AgentRunLog, FileNode, Project
 
 logger = logging.getLogger(__name__)
 
@@ -229,6 +231,7 @@ async def ab_compare(
     agent_md = ""
     agent_error: str | None = None
     agent_meta: dict = {}
+    t_agent = time.monotonic()
     try:
         agent_md, agent_meta = await _run_agent_prior_art(idea, p)
         if agent_meta.get("error"):
@@ -238,6 +241,31 @@ async def ab_compare(
     except Exception as exc:  # noqa: BLE001
         logger.exception("agent path failed")
         agent_error = f"agent exception: {exc}"
+    finally:
+        # v0.19-D: ab_compare 的 agent 那条写一行日志（mining 那条是纯模板不写）
+        try:
+            _ab_log_db = SessionLocal()
+            try:
+                _ab_log_db.add(AgentRunLog(
+                    endpoint="ab_compare",
+                    project_id=project_id,
+                    idea=(idea or "")[:4000],
+                    num_turns=None,
+                    total_cost_usd=None,
+                    duration_ms=int((time.monotonic() - t_agent) * 1000),
+                    stop_reason=None,
+                    fallback_used=False,
+                    error=(agent_error or None) and str(agent_error)[:2000],
+                    is_mock=not settings.use_agent_sdk_real,
+                ))
+                _ab_log_db.commit()
+            except Exception:
+                _ab_log_db.rollback()
+                raise
+            finally:
+                _ab_log_db.close()
+        except Exception as _exc:  # noqa: BLE001
+            logger.warning("ab_compare agent_run_log write failed: %s", _exc)
 
     if not agent_md:
         agent_md = (

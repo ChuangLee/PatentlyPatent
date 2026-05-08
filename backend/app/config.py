@@ -45,6 +45,13 @@ class Settings(BaseModel):
     agent_prior_art: bool = os.environ.get("PP_AGENT_PRIOR_ART", "").lower() in (
         "1", "true", "yes",
     )
+    # v0.19-C：embodiments / claims 章节是否走 agent 智能版（失败 fallback 到 legacy）
+    agent_embodiments: bool = os.environ.get("PP_AGENT_EMBODIMENTS", "").lower() in (
+        "1", "true", "yes",
+    )
+    agent_claims: bool = os.environ.get("PP_AGENT_CLAIMS", "").lower() in (
+        "1", "true", "yes",
+    )
 
     # 智慧芽
     zhihuiya_token: str = os.environ.get("ZHIHUIYA_TOKEN", "")

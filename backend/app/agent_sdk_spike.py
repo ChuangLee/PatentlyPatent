@@ -18,6 +18,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import time
 import uuid
 from datetime import datetime, timezone
 from typing import Any, AsyncIterator
@@ -46,11 +47,13 @@ SYSTEM_PROMPT = (
     "你是一名资深专利挖掘助手。用户给出一段技术构思，"
     "你需要：\n"
     "1) 把构思拆成核心技术关键词；\n"
-    "2) 调用 search_patents / search_trends / search_applicants 工具，对若干"
-    "关键词组合做命中量、年度趋势、申请人分布检索；\n"
-    "3) 综合判断新颖性、技术热度、主要竞争对手；\n"
-    "4) 给出 3-5 条可挖掘的差异化角度；\n"
-    "5) 必要时调用 file_write_section 把分析结论写回项目（仅在用户明确要求"
+    "2) 调用 search_patents / search_trends / search_applicants / inventor_ranking 工具，对若干"
+    "关键词组合做命中量、年度趋势、申请人/发明人分布检索；\n"
+    "3) 必要时用 legal_status 查关键公开号的法律状态（有效/失效/审查中）；\n"
+    "4) 必要时用 file_search_in_project 在项目已有文件里搜历史素材；\n"
+    "5) 综合判断新颖性、技术热度、主要竞争对手；\n"
+    "6) 给出 3-5 条可挖掘的差异化角度；\n"
+    "7) 必要时调用 file_write_section 把分析结论写回项目（仅在用户明确要求"
     "保存或调用方传入 project_id 时才写）。\n"
     "保持简洁，工具调用次数不超过 6 次。最后用中文给出结论。"
 )
@@ -175,18 +178,222 @@ def _build_mcp_server():
             parent_folder=(args or {}).get("parent_folder") or "AI 输出",
         )
 
+    @tool(
+        "legal_status",
+        (
+            "智慧芽：查一个公开号的法律状态，返回有效/失效/审查中三档计数文本。"
+            "query 是公开号字符串（如 CN112367164B）。"
+        ),
+        {"query": str},
+    )
+    async def legal_status(args: dict[str, Any]) -> dict:
+        q = (args or {}).get("query", "").strip()
+        if not q:
+            return {"content": [{"type": "text", "text": "query 为空"}], "isError": True}
+        try:
+            data = await zhihuiya.simple_legal_status(q)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("legal_status tool failed: %s", exc)
+            return {
+                "content": [{"type": "text", "text": f"法律状态查询失败：{exc}"}],
+                "isError": True,
+            }
+        text = _format_legal_status(q, data)
+        return {
+            "content": [{"type": "text", "text": text}],
+            "data": data,
+        }
+
+    @tool(
+        "inventor_ranking",
+        "智慧芽：拿一个检索式下的 Top 10 发明人排名。返回 [{name, count}, ...]。lang 默认 cn。",
+        {"query": str, "lang": str},
+    )
+    async def inventor_ranking(args: dict[str, Any]) -> dict:
+        q = (args or {}).get("query", "").strip()
+        lang = (args or {}).get("lang") or "cn"
+        if not q:
+            return {"content": [{"type": "text", "text": "query 为空"}], "isError": True}
+        try:
+            raw = await zhihuiya.inventor_ranking(q, lang=lang, n=10)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("inventor_ranking tool failed: %s", exc)
+            return {
+                "content": [{"type": "text", "text": f"发明人查询失败：{exc}"}],
+                "isError": True,
+            }
+        normalized = _normalize_inventor_list(raw)
+        text = json.dumps(normalized, ensure_ascii=False)
+        return {
+            "content": [{"type": "text", "text": text}],
+            "data": normalized,
+        }
+
+    @tool(
+        "file_search_in_project",
+        (
+            "在指定 project 文件树下按关键字模糊搜文件正文（content LIKE '%keyword%'，"
+            "kind='file'）。返回最多 5 条命中 [{file_id, name, snippet}]，"
+            "snippet 是 keyword 前后 80 字截取。"
+        ),
+        {"project_id": str, "keyword": str},
+    )
+    async def file_search_in_project(args: dict[str, Any]) -> dict:
+        return await _do_file_search_in_project(
+            project_id=(args or {}).get("project_id", ""),
+            keyword=(args or {}).get("keyword", ""),
+        )
+
     server = create_sdk_mcp_server(
         name="patent-tools",
-        version="0.2.0",
-        tools=[search_patents, search_trends, search_applicants, file_write_section],
+        version="0.3.0",
+        tools=[
+            search_patents,
+            search_trends,
+            search_applicants,
+            file_write_section,
+            legal_status,
+            inventor_ranking,
+            file_search_in_project,
+        ],
     )
     allowed = [
         "mcp__patent-tools__search_patents",
         "mcp__patent-tools__search_trends",
         "mcp__patent-tools__search_applicants",
         "mcp__patent-tools__file_write_section",
+        "mcp__patent-tools__legal_status",
+        "mcp__patent-tools__inventor_ranking",
+        "mcp__patent-tools__file_search_in_project",
     ]
     return server, allowed
+
+
+# ─── tool 辅助：格式化 / 归一化 ───────────────────────────────────────────────
+
+
+def _format_legal_status(q: str, data: dict) -> str:
+    """智慧芽 simple-legal-status 字段名各版本不一，尽量兜底成有效/失效/审查中三档。"""
+    if not isinstance(data, dict):
+        return f'公开号 "{q}" 无法律状态数据'
+    # 常见字段：active / inactive / pending；或 valid / invalid / examining；或中文 key
+    def _pick(*keys, default=None):
+        for k in keys:
+            if k in data and data[k] is not None:
+                return data[k]
+        return default
+
+    active = _pick("active", "valid", "有效", "in_force", default=None)
+    inactive = _pick("inactive", "invalid", "失效", "expired", "lapsed", default=None)
+    pending = _pick("pending", "examining", "审查中", "in_examination", default=None)
+
+    # 若顶层没有这三档，再尝试 data.statistics / data.summary 一类
+    if active is None and inactive is None and pending is None:
+        nested = data.get("statistics") or data.get("summary") or {}
+        if isinstance(nested, dict):
+            active = nested.get("active") or nested.get("valid")
+            inactive = nested.get("inactive") or nested.get("invalid")
+            pending = nested.get("pending") or nested.get("examining")
+
+    parts = [f'公开号 "{q}" 法律状态：']
+    parts.append(f"  - 有效：{active if active is not None else '?'}")
+    parts.append(f"  - 失效：{inactive if inactive is not None else '?'}")
+    parts.append(f"  - 审查中：{pending if pending is not None else '?'}")
+    # 把 raw 也带一份，方便 LLM 看到
+    parts.append(f"  (raw: {json.dumps(data, ensure_ascii=False)[:200]})")
+    return "\n".join(parts)
+
+
+def _normalize_inventor_list(raw: list) -> list[dict]:
+    out: list[dict] = []
+    for item in (raw or [])[:10]:
+        if not isinstance(item, dict):
+            continue
+        name = (
+            item.get("name")
+            or item.get("inventor")
+            or item.get("inventor_name")
+            or item.get("title")
+            or ""
+        )
+        cnt = (
+            item.get("count")
+            or item.get("num")
+            or item.get("amount")
+            or item.get("value")
+            or 0
+        )
+        out.append({"name": str(name), "count": int(cnt or 0)})
+    return out
+
+
+# ─── file_search_in_project 业务实现 ─────────────────────────────────────────
+
+
+async def _do_file_search_in_project(*, project_id: str, keyword: str) -> dict:
+    if not project_id:
+        return {
+            "content": [{"type": "text", "text": "project_id 为空"}],
+            "isError": True,
+        }
+    if not keyword:
+        return {
+            "content": [{"type": "text", "text": "keyword 为空"}],
+            "isError": True,
+        }
+
+    def _sync_search() -> list[dict]:
+        from .db import SessionLocal
+        from .models import FileNode
+
+        db = SessionLocal()
+        try:
+            like = f"%{keyword}%"
+            rows = (
+                db.query(FileNode)
+                .filter(
+                    FileNode.project_id == project_id,
+                    FileNode.kind == "file",
+                    FileNode.content.like(like),
+                )
+                .limit(5)
+                .all()
+            )
+            results: list[dict] = []
+            for r in rows:
+                snippet = ""
+                if r.content:
+                    idx = r.content.find(keyword)
+                    if idx >= 0:
+                        start = max(0, idx - 80)
+                        end = min(len(r.content), idx + len(keyword) + 80)
+                        snippet = r.content[start:end]
+                    else:
+                        snippet = r.content[:160]
+                results.append({
+                    "file_id": r.id,
+                    "name": r.name,
+                    "snippet": snippet,
+                })
+            return results
+        finally:
+            db.close()
+
+    try:
+        results = await asyncio.to_thread(_sync_search)
+    except Exception as exc:  # noqa: BLE001
+        return {
+            "content": [{"type": "text", "text": f"检索失败：{exc}"}],
+            "isError": True,
+        }
+    text = (
+        f'project={project_id} 关键字 "{keyword}" 命中 {len(results)} 个文件:\n'
+        + json.dumps(results, ensure_ascii=False)
+    )
+    return {
+        "content": [{"type": "text", "text": text}],
+        "data": results,
+    }
 
 
 # ─── file_write_section 业务实现（独立出来便于复用 / 测试） ──────────────────
@@ -469,6 +676,49 @@ async def _stream_mock(idea_text: str) -> AsyncIterator[dict]:
     }
     await asyncio.sleep(0.03)
 
+    # ---- tool 5: inventor_ranking ---------------------------------------
+    yield {
+        "type": "tool_use",
+        "name": "inventor_ranking",
+        "input": {"query": mock_query, "lang": "cn"},
+        "id": "mock-tool-5",
+    }
+    await asyncio.sleep(0.03)
+    if settings.use_real_zhihuiya:
+        try:
+            inv_raw = await zhihuiya.inventor_ranking(mock_query, lang="cn", n=10)
+        except Exception:  # noqa: BLE001
+            inv_raw = []
+        inventors = _normalize_inventor_list(inv_raw)
+    else:
+        inventors = [
+            {"name": "张伟", "count": 42},
+            {"name": "李娜", "count": 36},
+            {"name": "王芳", "count": 28},
+            {"name": "刘洋", "count": 22},
+            {"name": "陈鹏", "count": 18},
+        ]
+    yield {
+        "type": "tool_result",
+        "text": json.dumps(inventors, ensure_ascii=False),
+        "data": inventors,
+    }
+    await asyncio.sleep(0.03)
+
+    # ---- tool 6: file_search_in_project（mock 模式不真查） -----------------
+    yield {
+        "type": "tool_use",
+        "name": "file_search_in_project",
+        "input": {"project_id": "(mock)", "keyword": keyword.split()[0] if keyword else "区块链"},
+        "id": "mock-tool-6",
+    }
+    await asyncio.sleep(0.03)
+    yield {
+        "type": "tool_result",
+        "text": "mock 模式：未真查 DB。真实模式下会按 content LIKE 模糊匹配最多 5 个文件。",
+    }
+    await asyncio.sleep(0.03)
+
     # ---- tool 4: file_write_section（mock 不真写） ------------------------
     yield {
         "type": "tool_use",
@@ -519,25 +769,117 @@ async def agent_mine_stream(
     idea_text: str,
     *,
     max_turns: int = 8,
+    endpoint: str = "mine_spike",
+    project_id: str | None = None,
 ) -> AsyncIterator[dict]:
-    """统一入口。无 key 或 SDK 异常时走 mock。"""
+    """统一入口。无 key 或 SDK 异常时走 mock。
+
+    v0.19: 入口包 timer + 写 AgentRunLog（监控失败绝不阻塞业务）。
+    """
     idea_text = (idea_text or "").strip()
     if not idea_text:
         yield {"type": "error", "message": "idea 为空"}
         return
 
-    # v0.18-A: 走 agent SDK 真路径只需 claude CLI（OAuth 认证），不强求 ANTHROPIC_API_KEY
-    if not settings.use_agent_sdk_real:
-        async for ev in _stream_mock(idea_text):
-            yield ev
-        return
+    t0 = time.monotonic()
+    is_mock = not settings.use_agent_sdk_real
+    fallback_used = False
+    last_done: dict | None = None
+    last_error: str | None = None
 
-    # 真 SDK 路径，外层兜底
     try:
-        async for ev in _stream_real_sdk(idea_text, max_turns):
-            yield ev
-    except Exception as exc:  # noqa: BLE001
-        logger.exception("agent_sdk real path failed, falling back to mock")
-        yield {"type": "error", "message": f"SDK 调用失败，降级 mock：{exc}"}
-        async for ev in _stream_mock(idea_text):
-            yield ev
+        # v0.18-A: 走 agent SDK 真路径只需 claude CLI（OAuth 认证），不强求 ANTHROPIC_API_KEY
+        if is_mock:
+            async for ev in _stream_mock(idea_text):
+                if ev.get("type") == "done":
+                    last_done = ev
+                elif ev.get("type") == "error":
+                    last_error = ev.get("message")
+                yield ev
+            return
+
+        # 真 SDK 路径，外层兜底
+        try:
+            async for ev in _stream_real_sdk(idea_text, max_turns):
+                if ev.get("type") == "done":
+                    last_done = ev
+                elif ev.get("type") == "error":
+                    last_error = ev.get("message")
+                yield ev
+        except Exception as exc:  # noqa: BLE001
+            logger.exception("agent_sdk real path failed, falling back to mock")
+            fallback_used = True
+            last_error = f"SDK 调用失败，降级 mock：{exc}"
+            yield {"type": "error", "message": last_error}
+            async for ev in _stream_mock(idea_text):
+                if ev.get("type") == "done":
+                    last_done = ev
+                yield ev
+    finally:
+        duration_ms = int((time.monotonic() - t0) * 1000)
+        try:
+            await _write_run_log(
+                endpoint=endpoint,
+                project_id=project_id,
+                idea=idea_text,
+                duration_ms=duration_ms,
+                done=last_done,
+                error=last_error,
+                is_mock=is_mock or fallback_used,
+                fallback_used=fallback_used,
+            )
+        except Exception as exc:  # noqa: BLE001
+            # 监控失败绝不阻塞业务
+            logger.warning("agent_run_log write failed: %s", exc)
+
+
+# ─── observability：写 AgentRunLog ───────────────────────────────────────────
+
+
+async def _write_run_log(
+    *,
+    endpoint: str,
+    project_id: str | None,
+    idea: str | None,
+    duration_ms: int,
+    done: dict | None,
+    error: str | None,
+    is_mock: bool,
+    fallback_used: bool,
+) -> None:
+    """同步 ORM 用 to_thread 包一层。失败由调用方 try 兜住。"""
+    num_turns = None
+    total_cost_usd = None
+    stop_reason = None
+    if isinstance(done, dict):
+        num_turns = done.get("num_turns")
+        total_cost_usd = done.get("total_cost_usd")
+        stop_reason = done.get("stop_reason")
+
+    def _sync_write() -> None:
+        from .db import SessionLocal
+        from .models import AgentRunLog
+
+        db = SessionLocal()
+        try:
+            row = AgentRunLog(
+                endpoint=endpoint,
+                project_id=project_id,
+                idea=(idea or "")[:4000],
+                num_turns=num_turns,
+                total_cost_usd=total_cost_usd,
+                duration_ms=duration_ms,
+                stop_reason=(stop_reason or None) and str(stop_reason)[:32],
+                fallback_used=bool(fallback_used),
+                error=(error or None) and str(error)[:2000],
+                is_mock=bool(is_mock),
+            )
+            db.add(row)
+            db.commit()
+        except Exception:
+            db.rollback()
+            raise
+        finally:
+            db.close()
+
+    await asyncio.to_thread(_sync_write)
