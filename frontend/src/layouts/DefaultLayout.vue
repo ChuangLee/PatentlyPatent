@@ -9,6 +9,7 @@ import { useUIStore } from '@/stores/ui';
 import { projectsApi } from '@/api/projects';
 import RoleBadge from '@/components/common/RoleBadge.vue';
 import FileTree from '@/components/workbench/FileTree.vue';
+import UsageTutorial from '@/components/tutorial/UsageTutorial.vue';
 import type { Project, ProjectStatus } from '@/types';
 
 const router = useRouter();
@@ -212,7 +213,16 @@ const userDept = computed(() => auth.user?.department || '');
 // 装饰性搜索框（暂不接逻辑）
 const searchValue = ref('');
 
-const APP_VERSION = 'v0.23';
+const APP_VERSION = 'v0.26';
+
+// v0.26：使用教程 modal
+const tutorialOpen = ref(false);
+function openTutorial() { tutorialOpen.value = true; }
+function closeTutorial() { tutorialOpen.value = false; }
+function tutorialStartNow() {
+  tutorialOpen.value = false;
+  router.push('/employee/dashboard?new=1');
+}
 </script>
 
 <template>
@@ -400,6 +410,15 @@ const APP_VERSION = 'v0.23';
           </div>
 
           <button
+            class="pp-header__tutorial-btn"
+            title="使用教程"
+            data-testid="tutorial-btn"
+            @click="openTutorial"
+          >
+            📖 使用教程
+          </button>
+
+          <button
             class="pp-header__icon-btn"
             :title="ui.theme === 'dark' ? '切换到浅色模式' : '切换到深色模式'"
             @click="ui.toggleTheme()"
@@ -428,6 +447,22 @@ const APP_VERSION = 'v0.23';
         <router-view />
       </a-layout-content>
     </a-layout>
+
+    <!-- v0.26：使用教程 modal -->
+    <a-modal
+      :open="tutorialOpen"
+      :width="1200"
+      :style="{ top: '40px' }"
+      :footer="null"
+      :body-style="{ padding: 0, maxHeight: '78vh', overflowY: 'auto' }"
+      :destroy-on-close="true"
+      wrap-class-name="pp-tutorial-modal"
+      title="📖 PatentlyPatent 使用教程"
+      @cancel="closeTutorial"
+      @update:open="(v: boolean) => (tutorialOpen = v)"
+    >
+      <UsageTutorial @start="tutorialStartNow" @skip="closeTutorial" />
+    </a-modal>
   </a-layout>
 </template>
 
@@ -833,6 +868,35 @@ const APP_VERSION = 'v0.23';
   padding: 1px 5px;
   background: var(--pp-color-surface);
   letter-spacing: 0.5px;
+}
+
+.pp-header__tutorial-btn {
+  height: 32px;
+  padding: 0 12px;
+  border-radius: var(--pp-radius-md);
+  border: 1px solid var(--pp-color-border);
+  background: var(--pp-color-bg-elevated);
+  color: var(--pp-color-text-secondary);
+  font-size: 13px;
+  font-family: inherit;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  letter-spacing: 0.2px;
+  transition: var(--pp-transition);
+}
+.pp-header__tutorial-btn:hover {
+  border-color: var(--pp-color-primary);
+  color: var(--pp-color-primary);
+  background: var(--pp-color-surface);
+  box-shadow: var(--pp-shadow-sm);
+}
+@media (max-width: 900px) {
+  .pp-header__tutorial-btn {
+    padding: 0 8px;
+    font-size: 12px;
+  }
 }
 
 .pp-header__icon-btn {

@@ -13,6 +13,9 @@ const auth = useAuthStore();
 const casEnabled = ref(false);
 const loading = ref<Role | null>(null);
 const year = new Date().getFullYear();
+// v0.26：仅在 dev 模式（`vite`/`vite dev`）下显示「dev 模式选角色」入口；
+// 生产构建（`vite build`）时 import.meta.env.DEV === false，员工/管理员一键登录全部隐藏。
+const isDev = import.meta.env.DEV === true;
 
 async function loginAs(role: Role) {
   if (loading.value) return;
@@ -127,39 +130,48 @@ const features = [
           🏢 &nbsp;使用企业 CAS 登录
         </a-button>
 
-        <div class="pp-login__divider">
-          <span>{{ casEnabled ? '— 或 dev 模式选角色 —' : '— dev 模式选角色 —' }}</span>
+        <!-- 生产环境且未启用 CAS：给提示，不暴露 dev 入口 -->
+        <div v-if="!isDev && !casEnabled" class="pp-login__cas-hint">
+          请联系管理员配置 CAS 单点登录 (PP_CAS_ENABLED=1)
         </div>
 
-        <div class="pp-login__role-grid">
-          <button
-            type="button"
-            class="pp-login__role pp-login__role--employee"
-            :disabled="!!loading"
-            @click="loginAs('employee')"
-          >
-            <span class="pp-login__role-icon">👤</span>
-            <span class="pp-login__role-title">员工</span>
-            <span class="pp-login__role-sub">报门 · 挖掘 · 交底书</span>
-            <span v-if="loading === 'employee'" class="pp-login__role-loading">登录中…</span>
-          </button>
-          <button
-            type="button"
-            class="pp-login__role pp-login__role--admin"
-            :disabled="!!loading"
-            @click="loginAs('admin')"
-          >
-            <span class="pp-login__role-icon">📊</span>
-            <span class="pp-login__role-title">管理员</span>
-            <span class="pp-login__role-sub">全量项目 · Agent 监控</span>
-            <span v-if="loading === 'admin'" class="pp-login__role-loading">登录中…</span>
-          </button>
-        </div>
+        <!-- 仅 dev / staging 模式（vite dev）显示快速选角色入口 -->
+        <template v-if="isDev">
+          <div class="pp-login__divider">
+            <span>{{ casEnabled ? '— 或 dev 模式选角色 —' : '— dev 模式选角色 —' }}</span>
+          </div>
+
+          <div class="pp-login__role-grid">
+            <button
+              type="button"
+              class="pp-login__role pp-login__role--employee"
+              :disabled="!!loading"
+              @click="loginAs('employee')"
+            >
+              <span class="pp-login__role-icon">👤</span>
+              <span class="pp-login__role-title">员工</span>
+              <span class="pp-login__role-sub">报门 · 挖掘 · 交底书</span>
+              <span v-if="loading === 'employee'" class="pp-login__role-loading">登录中…</span>
+            </button>
+            <button
+              type="button"
+              class="pp-login__role pp-login__role--admin"
+              :disabled="!!loading"
+              @click="loginAs('admin')"
+            >
+              <span class="pp-login__role-icon">📊</span>
+              <span class="pp-login__role-title">管理员</span>
+              <span class="pp-login__role-sub">全量项目 · Agent 监控</span>
+              <span v-if="loading === 'admin'" class="pp-login__role-loading">登录中…</span>
+            </button>
+          </div>
+        </template>
 
         <p class="pp-login__hint">
-          演示数据驻留浏览器；刷新可重置。<br />
+          <span v-if="isDev">演示数据驻留浏览器；刷新可重置。<br /></span>
           仓库：github.com/ChuangLee/PatentlyPatent
         </p>
+        <div class="pp-login__version">v0.26 · 准备上线</div>
       </div>
     </section>
   </div>
@@ -405,6 +417,24 @@ const features = [
   color: var(--pp-color-text-tertiary);
   line-height: 1.6;
   text-align: center;
+}
+.pp-login__cas-hint {
+  margin-top: var(--pp-space-4);
+  padding: 10px 12px;
+  border-radius: var(--pp-radius-md);
+  background: var(--pp-color-bg-elevated);
+  border: 1px dashed var(--pp-color-border);
+  color: var(--pp-color-text-secondary);
+  font-size: 12px;
+  line-height: 1.55;
+  text-align: center;
+}
+.pp-login__version {
+  margin-top: var(--pp-space-3);
+  text-align: center;
+  font-size: 11px;
+  color: var(--pp-color-text-tertiary);
+  letter-spacing: 0.4px;
 }
 
 /* ---------- 响应式：< 900px 单栏堆叠 ---------- */

@@ -619,3 +619,55 @@ title: PatentlyPatent 迭代日志
 **修改文件**
 - backend/app/agent_sdk_spike.py（+~120 行：tool 定义 + _do_save_research helper + system prompt 加条目）
 - backend/app/agent_section_demo.py（prior_art SECTION_PROMPT 加 save_research 提示）
+
+
+## v0.26 · 2026-05-08 17:00 · 上线就绪：清测试数据 + 隐藏 dev role + 使用教程
+
+**1. 测试数据清空（保留 demo users）**
+- 备份 `backend/patentlypatent.db.bak.v0.26`（200KB）
+- DELETE projects (9) / file_nodes / agent_run_logs；保留 users 表 (u1/u2)
+- 公网 GET /api/projects 返 0 项目
+
+**2. dev role 选择隐藏（subagent）**
+- Login.vue 加 `const isDev = import.meta.env.DEV === true`（vite build 后 false）
+- 「— 或 dev 模式选角色 —」+ 员工/管理员按钮包入 v-if="isDev"
+- 非 dev 且 cas_enabled=false 时显示提示「请联系管理员配置 CAS 单点登录 (PP_CAS_ENABLED=1)」
+- Login 加角标「v0.26 · 准备上线」，DefaultLayout 版本号 v0.23 → v0.26
+
+**3. 使用教程组件（subagent）**
+- DefaultLayout Header 主题切换 🌙 之前加按钮「📖 使用教程」（ghost 浅色）
+- 点击 → a-modal 1200×78vh 弹 UsageTutorial.vue（约 540 行）
+- 6 步分章节：
+  1. 报门 · 提交创意（form 卡示意）
+  2. 工作台 · 5 步 timeline（含 finish/process/wait + pulse）
+  3. Agent 自驱挖掘（tool_call 卡 grid：search_patents/applicants/save_research）
+  4. 文件树 · 三类产物（我的资料 / AI 输出 / 📚 专利知识）
+  5. 答问回填（chat 气泡对话）
+  6. 导出 .docx（按钮 + 文件名）
+- 末尾「跳过教程」+「🚀 立即开始」CTA → 关闭 + Dashboard?new=1 触发新建报门
+
+**4. 上线检查 OK**
+- VITE_USE_MSW prod=false（正确）；dev=true（不影响 prod）
+- agent _stream_mock 路径保留作为真路径失败 fallback（不影响 demo）
+- fixtures.py 保留 u1/u2 演示用户（CAS 启用后会 auto-create 真用户）
+- /api/ping 返 cas_enabled=false（待用户提供企业 CAS URL 切换）
+
+**测试 / 部署**
+- pnpm test 44/44 / pnpm build 通
+- 公网部署 200，projects=0（清空）
+- 教程 modal 渲染 OK（dev 路径已构建）
+
+**正式上线 checklist (建议)**
+- [ ] 提供企业 CAS server URL，写到 systemd override 加 PP_CAS_ENABLED=1 + PP_CAS_SERVER=...
+- [ ] 真 ANTHROPIC_API_KEY 或 confirm claude CLI 长期 OAuth 认证（已 work）
+- [ ] 智慧芽 token 当前在 .secrets/zhihuiya.env 有效
+- [ ] PP_DAILY_BUDGET_BLOCK 阈值确认 ($10 默认)
+- [ ] PP_AGENT_PRIOR_ART=1 已开（默认走 agent）
+- [ ] 配置 cron 备份 sqlite db (deploy_runbook.md 已写)
+- [ ] Sentry / 错误监控（运维手册建议补做）
+
+**改动文件**
+- backend/patentlypatent.db (清数据)
+- frontend/src/views/login/Login.vue (+33 行)
+- frontend/src/layouts/DefaultLayout.vue (+~40 行 + 版本号)
+- frontend/src/components/tutorial/UsageTutorial.vue (新增 540 行)
