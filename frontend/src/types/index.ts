@@ -120,7 +120,7 @@ export interface Project {
 
 // 文件树节点
 export type FileNodeKind = 'folder' | 'file';
-export type FileSource = 'user' | 'ai' | 'system';
+export type FileSource = 'user' | 'ai' | 'system' | 'kb';   // v0.22: kb=只读专利知识库
 export type FileMime =
   | 'text/markdown'
   | 'text/plain'
@@ -128,7 +128,9 @@ export type FileMime =
   | 'image/png' | 'image/jpeg' | 'image/svg+xml'
   | 'application/pdf'
   | 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' // docx
-  | 'text/x-link';                                    // 自造类型表示链接
+  | 'text/x-link'
+  | 'text/html'
+  | string;                                           // kb 节点 mime 来自后端 mimetypes，宽松
 
 export interface FileNode {
   id: string;
@@ -141,6 +143,7 @@ export interface FileNode {
   size?: number;
   content?: string;                 // 内联文本内容（md/txt/json）
   url?: string;                     // 外链 / 占位下载
+  kbPath?: string;                  // v0.22: source='kb' 时的相对路径（懒加载用）
   createdAt: string;
   updatedAt: string;
 }

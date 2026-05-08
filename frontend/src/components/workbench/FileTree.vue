@@ -26,6 +26,7 @@ import {
 } from '@ant-design/icons-vue';
 import { useFilesStore } from '@/stores/files';
 import { filesApi } from '@/api/files';
+import { kbApi } from '@/api/kb';
 import type { FileNode, FileMime } from '@/types';
 
 const props = defineProps<{ projectId: string }>();
@@ -112,11 +113,84 @@ function toAntdTreeData(parentId: string | null): AntdTreeNode[] {
   }));
 }
 
-const treeData = computed<AntdTreeNode[]>(() => toAntdTreeData(null));
+// v0.22: 专利知识 kb 只读虚拟节点（懒加载子节点）
+const kbVirtualRoot: FileNode = {
+  id: 'kb-root',
+  name: '专利知识',
+  kind: 'folder',
+  parentId: null,
+  source: 'kb',
+  hidden: false,
+  createdAt: '',
+  updatedAt: '',
+};
+const kbChildrenById = ref<Record<string, FileNode[]>>({});  // 缓存已加载层级
+const kbLoadedKeys = ref<Set<string>>(new Set());
+
+function kbToAntdNode(n: FileNode): AntdTreeNode {
+  const cached = kbChildrenById.value[n.id];
+  return {
+    key: n.id,
+    title: n.name,
+    isLeaf: n.kind === 'file',
+    raw: n,
+    children: cached ? cached.map(kbToAntdNode) : undefined,
+  };
+}
+
+async function loadKbChildren(node: AntdTreeNode): Promise<void> {
+  if (kbLoadedKeys.value.has(node.key)) return;
+  const path = (node.raw.kbPath ?? '');  // root 时为空
+  try {
+    const list = await kbApi.tree(path);
+    kbChildrenById.value[node.key] = list;
+    kbLoadedKeys.value.add(node.key);
+  } catch (e: any) {
+    message.error(`加载专利知识失败：${e?.message || e}`);
+  }
+}
+
+/** a-tree loadData hook（仅 kb 节点用；非 kb 节点 children 已是同步） */
+function onLoadData(node: any): Promise<void> {
+  const raw = node?.raw as FileNode | undefined;
+  if (raw?.source === 'kb' && raw.kind === 'folder') {
+    return loadKbChildren(node as AntdTreeNode);
+  }
+  return Promise.resolve();
+}
+
+const treeData = computed<AntdTreeNode[]>(() => {
+  const projectNodes = toAntdTreeData(null);
+  return [...projectNodes, kbToAntdNode(kbVirtualRoot)];
+});
+
+/** 检查节点是否只读（kb 全部只读） */
+function isReadonly(n: FileNode | undefined | null): boolean {
+  return !!n && n.source === 'kb';
+}
+
+/** 工具：当前选中节点是否 kb（用于 disable 按钮） */
+const selectedIsKb = computed<boolean>(() => {
+  const id = selectedKeys.value[0];
+  if (!id) return false;
+  // 先看 store
+  const n = files.getNode(id);
+  if (n) return n.source === 'kb';
+  // store 没有 → 看是否 kb 缓存里
+  for (const arr of Object.values(kbChildrenById.value)) {
+    const hit = arr.find(x => x.id === id);
+    if (hit) return true;
+  }
+  return id.startsWith('kb');
+});
 
 /** 文件 icon by mime */
 function iconFor(node: FileNode): string {
-  if (node.kind === 'folder') return '📁';
+  if (node.kind === 'folder') {
+    if (node.id === 'kb-root') return '📚';
+    if (node.source === 'kb') return '📂';
+    return '📁';
+  }
   const m: FileMime | undefined = node.mime;
   if (m === 'text/markdown') return '📄';
   if (m === 'text/plain') return '📄';
@@ -323,18 +397,54 @@ async function onNativeDrop(e: DragEvent) {
 }
 
 // ─── 节点选中 / 展开 ───
+const kbPreviewOpen = ref(false);
+const kbPreviewNode = ref<FileNode | null>(null);
+const kbPreviewContent = ref('');
+const kbPreviewLoading = ref(false);
+
+function findKbNode(id: string): FileNode | null {
+  for (const arr of Object.values(kbChildrenById.value)) {
+    const hit = arr.find(x => x.id === id);
+    if (hit) return hit;
+  }
+  return id === 'kb-root' ? kbVirtualRoot : null;
+}
+
+async function openKbPreview(node: FileNode) {
+  kbPreviewNode.value = node;
+  kbPreviewOpen.value = true;
+  kbPreviewContent.value = '';
+  if (node.kind !== 'file' || !node.kbPath) return;
+  const m = node.mime || '';
+  // 二进制类不预加载，让 iframe 走 url
+  if (m.startsWith('application/pdf') || m.startsWith('image/')) return;
+  kbPreviewLoading.value = true;
+  try {
+    kbPreviewContent.value = await kbApi.file(node.kbPath);
+  } catch (e: any) {
+    kbPreviewContent.value = `（加载失败：${e?.message || e}）`;
+  } finally {
+    kbPreviewLoading.value = false;
+  }
+}
+
+function kbDownloadUrl(path: string): string {
+  return `/patent/api/kb/file?path=${encodeURIComponent(path)}`;
+}
+
 function onSelect(keys: (string | number)[]) {
   selectedKeys.value = keys.map(k => String(k));
   const id = selectedKeys.value[0];
   if (!id) return;
+  // kb 节点走 modal 预览（不入 store，不持久化）
+  const kbNode = findKbNode(id);
+  if (kbNode) {
+    if (kbNode.kind === 'file') openKbPreview(kbNode);
+    return;
+  }
   const node = files.getNode(id);
   if (!node) return;
-  if (node.kind === 'file') {
-    files.selectFile(id);
-  } else {
-    // 文件夹：清空当前预览（让 previewer 显示子项列表）
-    files.selectFile(id);
-  }
+  files.selectFile(id);
 }
 
 function onExpand(keys: (string | number)[]) {
@@ -388,6 +498,11 @@ function onDrop(info: DropInfo) {
   dragOverKey.value = null;
   const dragId = String(info.dragNode.key);
   const targetId = String(info.node.key);
+  // kb 节点拒绝任何拖拽（拖入或拖出）
+  if (findKbNode(dragId) || findKbNode(targetId)) {
+    message.info('「专利知识」是只读的，不可拖拽');
+    return;
+  }
   const target = files.getNode(targetId);
   if (!target) return;
 
@@ -461,6 +576,10 @@ function deleteSelected() {
   const id = selectedKeys.value[0];
   if (!id) {
     message.info('请先点选一个文件或文件夹');
+    return;
+  }
+  if (findKbNode(id)) {
+    message.warning('「专利知识」是只读的，不可删除');
     return;
   }
   const node = files.getNode(id);
@@ -660,6 +779,7 @@ function renderNodeTitle(node: AntdTreeNode) {
             :expanded-keys="expandedKeys"
             :checkable="checkable"
             :checked-keys="checkedKeys"
+            :load-data="onLoadData"
             :class="{ 'pp-tree-wrap': wrapNames, 'pp-tree-dragging': dragOverKey !== null }"
             block-node
             draggable
@@ -702,6 +822,40 @@ function renderNodeTitle(node: AntdTreeNode) {
     <!-- 重命名 modal -->
     <AModal v-model:open="renameOpen" title="重命名" @ok="confirmRename" ok-text="保存" cancel-text="取消">
       <AInput v-model:value="renameValue" @press-enter="confirmRename" />
+    </AModal>
+
+    <!-- v0.22: 专利知识 kb 文件预览 modal（只读） -->
+    <AModal
+      v-model:open="kbPreviewOpen"
+      :title="kbPreviewNode ? `📚 ${kbPreviewNode.name}（只读）` : '专利知识'"
+      :footer="null"
+      width="80vw"
+      :body-style="{ maxHeight: '78vh', overflow: 'auto', padding: '16px 20px' }"
+    >
+      <div v-if="kbPreviewLoading" style="text-align:center;padding:40px;color:#999">加载中…</div>
+      <template v-else-if="kbPreviewNode?.kbPath">
+        <!-- pdf -->
+        <iframe
+          v-if="(kbPreviewNode.mime || '').includes('pdf')"
+          :src="kbDownloadUrl(kbPreviewNode.kbPath)"
+          style="width:100%;height:70vh;border:0"
+        />
+        <!-- 图片 -->
+        <img
+          v-else-if="(kbPreviewNode.mime || '').startsWith('image/')"
+          :src="kbDownloadUrl(kbPreviewNode.kbPath)"
+          style="max-width:100%;height:auto"
+        />
+        <!-- markdown / 文本 / json / html：纯文本展示 -->
+        <pre
+          v-else
+          style="white-space:pre-wrap;word-break:break-word;font-family:inherit;font-size:13px;line-height:1.65;margin:0"
+        >{{ kbPreviewContent }}</pre>
+      </template>
+      <div style="margin-top:12px;padding-top:8px;border-top:1px solid #eee;color:#999;font-size:12px">
+        来源：本项目 refs/专利专家知识库 ·
+        <a v-if="kbPreviewNode?.kbPath" :href="kbDownloadUrl(kbPreviewNode.kbPath)" target="_blank">原文件直链</a>
+      </div>
     </AModal>
   </div>
 </template>

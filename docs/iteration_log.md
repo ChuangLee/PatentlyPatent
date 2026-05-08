@@ -472,3 +472,42 @@ title: PatentlyPatent 迭代日志
 - 多租户隔离（同 idea 不同 user 的 cache 怎么避免穿透）
 - 前端报门 e2e ui 测试（playwright）
 - 更细粒度 prompt cache：tool 描述也单独 cache
+
+
+## v0.22 · 2026-05-08 15:15 · 文件树加「专利知识」只读 kb 浏览
+
+**需求**：每个项目默认能看到本项目 `refs/专利专家知识库/` 的内容（37 子目录 / 419 文件 / 92.7MB），但只能浏览不能编辑
+
+**实现**
+- 后端 `backend/app/routes/kb.py` 新增：
+  - GET `/api/kb/tree?path=` 一层目录列表（懒加载，不递归）
+  - GET `/api/kb/file?path=` 单文件读取（md/txt/json 返 text；pdf/image 返 binary stream；max 5MB）
+  - GET `/api/kb/stats` 总计：subdirs=37, files=419, bytes=92.7MB
+  - `_safe_path` 路径校验防 ..; 跳过 . 隐藏文件
+- 前端 `src/api/kb.ts` 三个端点封装
+- 前端 `src/components/workbench/FileTree.vue`：
+  - 注入虚拟 root `📚 专利知识`（id='kb-root', source='kb'），与项目 fileTree 拼接
+  - a-tree `:load-data` hook 懒加载：展开时调 kbApi.tree(path)，缓存到 `kbChildrenById`
+  - 点击 kb 文件 → modal 弹窗预览（不入 store，不持久化）：md/txt/json 用 pre 渲染 / pdf 用 iframe / 图片直链；底部"原文件直链"
+  - mutate 守卫：`onDrop` `deleteSelected` 检测 `findKbNode(id)` → message.warning 拒绝
+  - icon：root='📚'，kb folder='📂'
+- 前端 `types/index.ts` FileSource 加 `'kb'`，FileMime 改宽松 string；FileNode 加 `kbPath?`
+
+**测试 / e2e**
+- pnpm test 44/44 / pnpm build vue-tsc 通
+- 公网部署 200
+- /api/kb/stats 返 `{subdirs:37, files:419, bytes:92695544}`
+- /api/kb/tree 返 root 44 项（37 folder + 7 file）
+- /api/kb/file?path=... 返真文件内容
+- 点击 kb 文件不会触发 store mutate（模态独立，刷新后不保留）
+
+**安全**
+- path 必须以 KB_ROOT 为前缀（resolve 后 startswith 校验）
+- max 5MB 单文件
+- 隐藏 . 开头文件
+- 任何写操作（drop/delete/rename/upload）对 kb 节点拒绝
+
+**未做（v0.23+）**
+- markdown 真实渲染（当前 pre 纯文本；可加 marked + highlight.js）
+- kb 内全文搜索（/api/kb/search?q=...）+ FileTree 顶部加搜索框
+- 大文件（>5MB pdf）加分页或流式
