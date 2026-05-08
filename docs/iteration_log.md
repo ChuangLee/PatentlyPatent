@@ -269,3 +269,28 @@ title: PatentlyPatent 迭代日志
 - 用 spike 替换 mining.py 一个章节生成（如"现有技术分析"小段）做 A/B 质量对比
 - 前端整合：在工作台加一个 toggle「Agent SDK 模式 / 老 mining」按钮供 admin 切换
 - 进一步 chunk 优化：vendor 中 691KB 杂项（看是哪些库可移到独立 chunk）
+
+
+## v0.17 · 2026-05-08 11:15 · agent SDK 真路径准备 + 4 tools + A/B 对比 + admin toggle
+
+**实现**（2 subagent + 自做 D 并行）
+- A. (subagent) `.secrets/anthropic.env.example` + README 注释；`backend/test_agent_sdk_real.py`（无 key skip / 有 key 跑 max_turns=4 断言事件）；main.py lifespan 加启动日志 `agent_sdk_spike: use_real_llm=False has_key=False use_real_zhihuiya=True`
+- B. (subagent) agent_sdk_spike.py 加 3 tool：search_trends（包 patent_trends）/ search_applicants（包 applicant_ranking）/ file_write_section（写 FileNode 到 DB，asyncio.to_thread 短事务，parent_folder 找不到自动创建）；mock 模式相应扩展；4 tool 全部注册 mcp_servers + allowed_tools
+- C. (subagent) 选定 mining.py "一、背景技术 prior_art" 章节做对比；新增 backend/app/agent_section_demo.py 323 行（3 tool + 真+mock 路径）；新增 docs/agent_vs_mining_compare.md 206 行 / 3 张表 / 4 节（老/新输出 + 11 维对比 + 5 周迁移路径）；老路径输出占位骨架 43 行 0 API call vs agent 路径 30 行成品 markdown + 2 tool call
+- D. (我做) types/index.ts ChatStreamEvent 加 tool_use/tool_result/error；ui store 加 agentMode 'mining'|'agent_sdk' + setAgentMode + localStorage 持久化；api/chat.ts 加 agentMineSpike() 调 /api/agent/mine_spike；AgentChatStream 中 autoMine() 按 ui.agentMode 分流端点；事件 handler 把 thinking/tool_use/tool_result/error 转成 chat delta 显示；admin 角色才看到 a-segmented 切换 UI，streaming 时 disabled
+
+**测试**
+- pnpm test 39/39 / pnpm build vue-tsc 通
+- backend systemctl restart 启动日志正常
+- 公网 spike e2e: SSE 流出 4 个 tool_use（search_patents/trends/applicants/file_write_section）+ delta + done
+- 老 chat/auto-mining 路径未动，零回归
+
+**关键洞察（来自 v0.17-C）**
+1. mining.py 是「占位 + 后填」模式（骨架稳定但信息稀薄），agent SDK 是「tool 自驱 + 直填数据」模式（信息真实但需 system_prompt 约束结构）
+2. 「先看命中多再追头部申请人」这种条件分支决策，老路径必须写在 Python，agent 路径 LLM 看完 tool_result 自动决定下一步——**要做自适应检索必须迁 agent**
+
+**下轮目标 (v0.18)**
+- 真 SDK 路径在有 ANTHROPIC_API_KEY 环境跑通（用户填 .secrets/anthropic.env）
+- 跑 v0.17-C 5 周迁移路径的 Week 1：用 agent 替换 mining.py 的 "一、背景技术" prior_art 章节
+- 工作台 admin 切到 Agent SDK 模式时，UI 渲染 tool_use/tool_result 用更好看的卡片（目前是文本 prepend）
+- mining.py vs agent 输出落到同一项目 ai-internal/_compare/ 文件夹，方便手测对比

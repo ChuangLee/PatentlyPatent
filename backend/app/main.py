@@ -15,6 +15,7 @@ from .routes import chat as r_chat
 from .routes import search as r_search
 from .routes import disclosure as r_disclosure
 from .routes import agent as r_agent
+from . import agent_sdk_spike
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
 log = logging.getLogger("patentlypatent")
@@ -27,6 +28,7 @@ async def lifespan(_: FastAPI):
         seed_users(db)
     log.info("startup ok | use_real_llm=%s | use_real_zhihuiya=%s",
              settings.use_real_llm, settings.use_real_zhihuiya)
+    agent_sdk_spike.log_startup_status()
     yield
 
 

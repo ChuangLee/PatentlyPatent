@@ -144,8 +144,12 @@ export interface IntakeAnswers {
 
 // SSE 事件类型
 export type ChatStreamEvent =
-  | { type: 'thinking' }
+  | { type: 'thinking'; text?: string }
   | { type: 'delta'; chunk: string }
   | { type: 'fields'; captured: string[] }
-  | { type: 'file'; node: FileNode }   // agent 在文件树上 spawn 一个文件
-  | { type: 'done' };
+  | { type: 'file'; node: FileNode }
+  // v0.17-D: agent SDK 扩展事件（spike endpoint 用）
+  | { type: 'tool_use'; name: string; input: Record<string, unknown>; id?: string }
+  | { type: 'tool_result'; text: string; data?: unknown }
+  | { type: 'error'; message: string }
+  | { type: 'done'; stop_reason?: string; mock?: boolean };
