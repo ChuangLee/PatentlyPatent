@@ -596,3 +596,26 @@ title: PatentlyPatent 迭代日志
 - micro-interaction：节点拖拽过渡 / 气泡入场动画 / 数字 count-up
 - 性能：首屏 vue chunk preload + 路由级 lazy 优化
 - a11y：键盘导航 + ARIA 标签 + 对比度审查
+
+
+## v0.25 · 2026-05-08 16:25 · agent 加 save_research tool — 重要素材自动落盘到「AI 输出/调研下载/<分类>/」
+
+**需求**：调研中遇到与创意相关的素材（类似已有专利/重要论文博客）应自动保存到项目文件树。专利知识 kb 已在文件树最后（v0.22 已实装）。
+
+**实现**
+- `agent_sdk_spike.py` 加第 8 个 tool `save_research(project_id, name, content, category, source_url)`
+- 注册到 mcp_server，allowed_tools，server version 0.3.0 → 0.4.0
+- 新 helper `_do_save_research`：3 级文件夹嵌套 ensure（AI 输出 → 调研下载 → 类似专利/相关文章/调研笔记），asyncio.to_thread + DB 短事务
+- category 取值：similar_patent → 类似专利 / related_article → 相关文章 / note → 调研笔记
+- 文件 metadata 头：分类 / 来源 URL / 保存时间，再接正文（agent 传的 markdown）
+- SYSTEM_PROMPT + agent_section_demo._SECTION_PROMPTS['prior_art'] 加调用提示
+
+**验证**
+- 真路径 ToolSearch 已枚举到 mcp__patent-tools__save_research
+- _do_save_research 直接调用：file_id=f-7954744fb3，path=`AI 输出/调研下载/类似专利/CN112367164B 区块链溯源.md`
+- DB 三级嵌套 OK：调研下载 (parent=root-ai-pid) / 类似专利 (parent=调研下载) / 文件 (parent=类似专利)
+- 「专利知识」已在 FileTree treeData spread 后追加（v0.22），仍在最后
+
+**修改文件**
+- backend/app/agent_sdk_spike.py（+~120 行：tool 定义 + _do_save_research helper + system prompt 加条目）
+- backend/app/agent_section_demo.py（prior_art SECTION_PROMPT 加 save_research 提示）

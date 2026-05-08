@@ -72,7 +72,10 @@ SYSTEM_PROMPT = (
     "6) 给出 3-5 条可挖掘的差异化角度；\n"
     "7) 必要时调用 file_write_section 把分析结论写回项目（仅在用户明确要求"
     "保存或调用方传入 project_id 时才写）。\n"
-    "保持简洁，工具调用次数不超过 6 次。最后用中文给出结论。"
+    "8) 调研中遇到与本创意高度相关的素材（类似已有专利 / 重要论文博客），"
+    "调用 save_research(category='similar_patent'|'related_article'|'note') "
+    "把要点摘要保存到「AI 输出/调研下载/<分类>/」下，便于员工查阅。\n"
+    "保持简洁，工具调用次数不超过 8 次。最后用中文给出结论。"
 )
 
 
@@ -195,6 +198,38 @@ def _build_mcp_server():
             return _safe_tool_error("file_write_section", exc)
 
     @tool(
+        "save_research",
+        (
+            "调研过程中遇到非常重要的素材（与本创意高度相关的论文/博客/类似已有专利等），"
+            "调用此工具把要点摘要保存到项目文件树「AI 输出/调研下载/<分类>/」下，"
+            "便于员工后续查阅。category 限定取值："
+            "'similar_patent'（类似已有专利，含公开号 / 申请人 / 与本案差异）、"
+            "'related_article'（相关文章 / 论文 / 博客，含来源链接和核心结论）、"
+            "'note'（其他笔记，调研中临时记录）。"
+            "name 是文件名（自动补 .md）；content 是 markdown 摘要；"
+            "source_url 可选，若有抓取/查到的原文链接请填上。"
+        ),
+        {
+            "project_id": str,
+            "name": str,
+            "content": str,
+            "category": str,
+            "source_url": str,
+        },
+    )
+    async def save_research(args: dict[str, Any]) -> dict:
+        try:
+            return await _do_save_research(
+                project_id=(args or {}).get("project_id", ""),
+                name=(args or {}).get("name", ""),
+                content=(args or {}).get("content", ""),
+                category=(args or {}).get("category") or "note",
+                source_url=(args or {}).get("source_url") or "",
+            )
+        except Exception as exc:  # noqa: BLE001
+            return _safe_tool_error("save_research", exc)
+
+    @tool(
         "legal_status",
         (
             "智慧芽：查一个公开号的法律状态，返回有效/失效/审查中三档计数文本。"
@@ -263,12 +298,13 @@ def _build_mcp_server():
 
     server = create_sdk_mcp_server(
         name="patent-tools",
-        version="0.3.0",
+        version="0.4.0",
         tools=[
             search_patents,
             search_trends,
             search_applicants,
             file_write_section,
+            save_research,
             legal_status,
             inventor_ranking,
             file_search_in_project,
@@ -279,6 +315,7 @@ def _build_mcp_server():
         "mcp__patent-tools__search_trends",
         "mcp__patent-tools__search_applicants",
         "mcp__patent-tools__file_write_section",
+        "mcp__patent-tools__save_research",
         "mcp__patent-tools__legal_status",
         "mcp__patent-tools__inventor_ranking",
         "mcp__patent-tools__file_search_in_project",
@@ -518,6 +555,117 @@ async def _do_file_write_section(
     )
     return {
         "content": [{"type": "text", "text": text}],
+        "file_id": result["file_id"],
+        "path": result["path"],
+    }
+
+
+# v0.25: 调研下载 — 把重要资料保存到「AI 输出/调研下载/<分类>/」
+_RESEARCH_CATEGORY_LABEL = {
+    "similar_patent": "类似专利",
+    "related_article": "相关文章",
+    "note": "调研笔记",
+}
+
+
+async def _do_save_research(
+    *,
+    project_id: str,
+    name: str,
+    content: str,
+    category: str = "note",
+    source_url: str = "",
+) -> dict:
+    if not project_id:
+        return {"content": [{"type": "text", "text": "project_id 为空"}], "isError": True}
+    if not name:
+        return {"content": [{"type": "text", "text": "name 为空"}], "isError": True}
+    cat_label = _RESEARCH_CATEGORY_LABEL.get(category, "调研笔记")
+
+    def _sync() -> dict:
+        from .db import SessionLocal
+        from .models import FileNode, Project
+
+        db = SessionLocal()
+        try:
+            proj = db.get(Project, project_id)
+            if not proj:
+                return {"ok": False, "error": f"project_id={project_id} 不存在"}
+
+            def _ensure_folder(folder_name: str, parent_id: str | None) -> str:
+                """找/建一个 folder 节点，返回其 id。"""
+                q = db.query(FileNode).filter(
+                    FileNode.project_id == project_id,
+                    FileNode.kind == "folder",
+                    FileNode.name == folder_name,
+                    FileNode.parent_id.is_(None) if parent_id is None else FileNode.parent_id == parent_id,
+                )
+                existing = q.first()
+                if existing:
+                    return existing.id
+                new_id = f"d-{uuid.uuid4().hex[:10]}"
+                db.add(FileNode(
+                    id=new_id,
+                    project_id=project_id,
+                    name=folder_name,
+                    kind="folder",
+                    parent_id=parent_id,
+                    source="ai",
+                    hidden=False,
+                ))
+                db.flush()
+                return new_id
+
+            ai_root = _ensure_folder("AI 输出", None)
+            research_root = _ensure_folder("调研下载", ai_root)
+            cat_folder = _ensure_folder(cat_label, research_root)
+
+            # 写文件，content 头部加 metadata
+            fname = name if name.endswith(".md") else f"{name}.md"
+            header_lines = [f"# {name}", ""]
+            header_lines.append(f"- 分类：{cat_label}")
+            if source_url:
+                header_lines.append(f"- 来源：{source_url}")
+            header_lines.append(f"- 保存时间：{datetime.now(timezone.utc).isoformat()}")
+            header_lines.append("")
+            header_lines.append("---")
+            header_lines.append("")
+            full_content = "\n".join(header_lines) + (content or "")
+
+            fid = f"f-{uuid.uuid4().hex[:10]}"
+            db.add(FileNode(
+                id=fid,
+                project_id=project_id,
+                name=fname,
+                kind="file",
+                parent_id=cat_folder,
+                source="ai",
+                mime="text/markdown",
+                content=full_content,
+                size=len(full_content.encode("utf-8")),
+                url=source_url or None,
+                hidden=False,
+            ))
+            db.commit()
+            return {
+                "ok": True,
+                "file_id": fid,
+                "path": f"AI 输出/调研下载/{cat_label}/{fname}",
+            }
+        except Exception as exc:  # noqa: BLE001
+            db.rollback()
+            return {"ok": False, "error": f"保存失败：{exc}"}
+        finally:
+            db.close()
+
+    result = await asyncio.to_thread(_sync)
+    if not result.get("ok"):
+        return {
+            "content": [{"type": "text", "text": result.get("error", "未知错误")}],
+            "isError": True,
+        }
+    return {
+        "content": [{"type": "text", "text": f"已保存到 {result['path']}"}],
         "file_id": result["file_id"],
         "path": result["path"],
     }
