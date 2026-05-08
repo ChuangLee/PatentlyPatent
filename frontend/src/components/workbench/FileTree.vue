@@ -4,19 +4,16 @@
  * 数据源：useFilesStore（要求父组件先 attach）
  */
 import { computed, ref, h } from 'vue';
-import {
-  Tree as ATree,
-  Button as AButton,
-  Modal as AModal,
-  Input as AInput,
-  Upload as AUpload,
-  Dropdown as ADropdown,
-  Menu as AMenu,
-  MenuItem as AMenuItem,
-  Tooltip as ATooltip,
-  Progress as AProgress,
-  message,
-} from 'ant-design-vue';
+import ATree from 'ant-design-vue/es/tree';
+import AButton from 'ant-design-vue/es/button';
+import AModal from 'ant-design-vue/es/modal';
+import AInput from 'ant-design-vue/es/input';
+import AUpload from 'ant-design-vue/es/upload';
+import ADropdown from 'ant-design-vue/es/dropdown';
+import AMenu, { Item as AMenuItem } from 'ant-design-vue/es/menu';
+import ATooltip from 'ant-design-vue/es/tooltip';
+import AProgress from 'ant-design-vue/es/progress';
+import message from 'ant-design-vue/es/message';
 import {
   FolderAddOutlined,
   UploadOutlined,

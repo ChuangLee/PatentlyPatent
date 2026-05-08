@@ -1,7 +1,8 @@
 <script setup lang="ts">
 import { ref, reactive, computed } from 'vue';
 import { useRouter } from 'vue-router';
-import { Progress as AProgress, message } from 'ant-design-vue';
+import AProgress from 'ant-design-vue/es/progress';
+import message from 'ant-design-vue/es/message';
 import { projectsApi } from '@/api/projects';
 import { useAuthStore } from '@/stores/auth';
 import type { Domain, ProjectStage, ProjectGoal, Attachment } from '@/types';

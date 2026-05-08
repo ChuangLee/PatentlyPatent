@@ -245,3 +245,27 @@ title: PatentlyPatent 迭代日志
 - vendor-antd 1.2MB 按需 import（unplugin 或手动）
 - admin Dashboard echarts 改异步 import
 - docs/architecture_v0.16.md 架构对比图（mermaid）
+
+
+## v0.16-BCD · 2026-05-08 10:05 · vendor-antd 按需 + echarts 异步 + 架构对比文档
+
+**实现**（3 个 subagent 并行）
+- B. (subagent) 装 unplugin-vue-components + AntDesignVueResolver(importStyle:false)；删 main.ts 的 `app.use(Antd)` 全局注册（这是主因）；10 个文件改 `import { X } from 'ant-design-vue'` → `import X from 'ant-design-vue/es/<comp>'`；vendor-antd **1232KB → 796KB**（gzip 371→240）
+- C. (subagent) admin Dashboard.vue 删顶部 echarts 静态 import；module-level lazy promise `_echartsP ??= import('echarts')`；drawCharts() 改 async；admin Dashboard chunk 2.9KB（不含 echarts），vendor-echarts 1042KB 改为路由级动态加载
+- D. (subagent) 新增 `docs/architecture_v0.16.md` 265 行 / 4 mermaid 图（决策一图流 / v0.15 当前 / v0.16+ 双轨 / SSE 序列）+ 5 对比表（13 维 / 流式事件 / 6 步迁移路径 / 8 风险 / 10 TODO）
+
+**测试**
+- pnpm test 39/39 / pnpm build vue-tsc 通
+- 公网 200 / api/ping ok / spike 端点 SSE 仍正常返事件流
+- chunk: 入口 ~5KB / vendor-antd 796KB（达标 < 800KB）/ vendor-echarts 1042KB（动态加载，首屏不含）
+
+**首屏体积估算**
+- 改前 v0.15：必加载 vendor-antd 1.2MB + index 1.5MB ≈ 2.7MB（gzip 845KB）
+- 改后 v0.16：必加载 vendor-vue 29KB + vendor-antd 796KB + 入口 ≈ 825KB（gzip 250KB）
+- echarts/mammoth 仅按需加载
+
+**下轮目标 (v0.17)**
+- v0.16-A spike 真 SDK 路径在有 ANTHROPIC_API_KEY 环境验证 + 加 trends/applicants tool
+- 用 spike 替换 mining.py 一个章节生成（如"现有技术分析"小段）做 A/B 质量对比
+- 前端整合：在工作台加一个 toggle「Agent SDK 模式 / 老 mining」按钮供 admin 切换
+- 进一步 chunk 优化：vendor 中 691KB 杂项（看是哪些库可移到独立 chunk）

@@ -1,6 +1,7 @@
 import { createApp } from 'vue';
 import { createPinia } from 'pinia';
-import Antd from 'ant-design-vue';
+// 不再 `app.use(Antd)` 全量注册 —— 改用 unplugin-vue-components 的 AntDesignVueResolver 按需自动 import
+// 仍保留 reset.css 全局样式
 import 'ant-design-vue/dist/reset.css';
 import './styles/tokens.css';
 import App from './App.vue';
@@ -25,7 +26,6 @@ async function bootstrap() {
   const app = createApp(App);
   app.use(createPinia());
   app.use(createAppRouter());
-  app.use(Antd);
   app.mount('#app');
 }
 

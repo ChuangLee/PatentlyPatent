@@ -7,7 +7,7 @@ import { useAuthStore } from '@/stores/auth';
 import ClaimTierSelector from '@/components/disclosure/ClaimTierSelector.vue';
 import TiptapEditor from '@/components/disclosure/TiptapEditor.vue';
 import ReadonlyBanner from '@/components/common/ReadonlyBanner.vue';
-import { message } from 'ant-design-vue';
+import message from 'ant-design-vue/es/message';
 import { exportDocx } from '@/utils/exportDocx';
 import type { Project, ClaimTier } from '@/types';
 

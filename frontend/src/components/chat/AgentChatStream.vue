@@ -3,7 +3,8 @@ import { ref, watch, nextTick } from 'vue';
 import { useChatStore } from '@/stores/chat';
 import { useFilesStore } from '@/stores/files';
 import { chatApi } from '@/api/chat';
-import { Button, Input } from 'ant-design-vue';
+import Button from 'ant-design-vue/es/button';
+import Input from 'ant-design-vue/es/input';
 
 const props = defineProps<{ projectId: string; round: number }>();
 const emit = defineEmits<{ (e: 'roundComplete', captured: string[]): void }>();

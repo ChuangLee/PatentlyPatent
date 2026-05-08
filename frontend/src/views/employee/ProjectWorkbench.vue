@@ -14,7 +14,7 @@ import FilePreviewer from '@/components/workbench/FilePreviewer.vue';
 import MiniChatView from '@/components/chat/MiniChatView.vue';
 import ReadonlyBanner from '@/components/common/ReadonlyBanner.vue';
 import { disclosureApi } from '@/api/disclosure';
-import { message } from 'ant-design-vue';
+import message from 'ant-design-vue/es/message';
 import { useUIStore } from '@/stores/ui';
 import type { Project, ProjectStatus, FileNode } from '@/types';
 

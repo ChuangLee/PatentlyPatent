@@ -1,10 +1,20 @@
 import { defineConfig } from 'vite';
 import vue from '@vitejs/plugin-vue';
+import Components from 'unplugin-vue-components/vite';
+import { AntDesignVueResolver } from 'unplugin-vue-components/resolvers';
 import { fileURLToPath, URL } from 'node:url';
 
 export default defineConfig(({ mode }) => ({
   base: '/patent/',
-  plugins: [vue()],
+  plugins: [
+    vue(),
+    Components({
+      // reset.css is already imported globally in main.ts -> set importStyle:false
+      // to avoid double css and let resolver only do auto-import of components
+      resolvers: [AntDesignVueResolver({ importStyle: false })],
+      dts: false,
+    }),
+  ],
   resolve: {
     alias: { '@': fileURLToPath(new URL('./src', import.meta.url)) },
   },

@@ -1,7 +1,9 @@
 <script setup lang="ts">
 import { computed, h, onMounted, ref, watch } from 'vue';
 import { useRouter, useRoute } from 'vue-router';
-import { Modal as AModal, Input as AInput, message } from 'ant-design-vue';
+import AModal from 'ant-design-vue/es/modal';
+import AInput from 'ant-design-vue/es/input';
+import message from 'ant-design-vue/es/message';
 import { useAuthStore } from '@/stores/auth';
 import { useUIStore } from '@/stores/ui';
 import { useFilesStore } from '@/stores/files';

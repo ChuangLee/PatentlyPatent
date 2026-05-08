@@ -1,8 +1,10 @@
 <script setup lang="ts">
 import { onMounted, ref, computed, watch, nextTick } from 'vue';
 import { projectsApi } from '@/api/projects';
-import * as echarts from 'echarts';
 import type { Project, ProjectStatus, Patentability } from '@/types';
+
+let _echartsP: Promise<typeof import('echarts')> | null = null;
+const getEcharts = () => (_echartsP ??= import('echarts'));
 
 const projects = ref<Project[]>([]);
 const statusChartRef = ref<HTMLDivElement | null>(null);
@@ -29,12 +31,13 @@ const stats = computed(() => {
 onMounted(async () => {
   projects.value = await projectsApi.list();
   await nextTick();
-  drawCharts();
+  await drawCharts();
 });
 
 watch(stats, () => drawCharts(), { deep: true });
 
-function drawCharts() {
+async function drawCharts() {
+  const echarts = await getEcharts();
   if (statusChartRef.value) {
     echarts.init(statusChartRef.value).setOption({
       title: { text: '项目状态分布', left: 'center' },

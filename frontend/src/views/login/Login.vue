@@ -2,7 +2,7 @@
 import { useRouter } from 'vue-router';
 import { authApi } from '@/api/auth';
 import { useAuthStore } from '@/stores/auth';
-import { message } from 'ant-design-vue';
+import message from 'ant-design-vue/es/message';
 import type { Role } from '@/types';
 
 const router = useRouter();

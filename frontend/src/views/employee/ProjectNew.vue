@@ -3,7 +3,7 @@ import { reactive, ref, computed } from 'vue';
 import { useRouter } from 'vue-router';
 import { projectsApi } from '@/api/projects';
 import { useAuthStore } from '@/stores/auth';
-import { message } from 'ant-design-vue';
+import message from 'ant-design-vue/es/message';
 import type { Domain, Attachment } from '@/types';
 
 const router = useRouter();

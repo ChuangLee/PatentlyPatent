@@ -3,13 +3,11 @@
  * 文件预览器 — 根据 useFilesStore().currentNode 渲染不同 mime 类型
  */
 import { computed, ref, watch } from 'vue';
-import {
-  Button as AButton,
-  Empty as AEmpty,
-  Spin as ASpin,
-  Textarea as ATextarea,
-  message,
-} from 'ant-design-vue';
+import AButton from 'ant-design-vue/es/button';
+import AEmpty from 'ant-design-vue/es/empty';
+import ASpin from 'ant-design-vue/es/spin';
+import { Textarea as ATextarea } from 'ant-design-vue/es/input';
+import message from 'ant-design-vue/es/message';
 import { marked } from 'marked';
 import { useFilesStore } from '@/stores/files';
 import { apiClient } from '@/api/client';

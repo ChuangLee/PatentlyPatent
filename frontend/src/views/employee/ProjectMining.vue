@@ -8,7 +8,7 @@ import AgentChatStream from '@/components/chat/AgentChatStream.vue';
 import MiningSummaryPanel from '@/components/chat/MiningSummaryPanel.vue';
 import ReadonlyBanner from '@/components/common/ReadonlyBanner.vue';
 import type { Project } from '@/types';
-import { message } from 'ant-design-vue';
+import message from 'ant-design-vue/es/message';
 
 const route = useRoute();
 const router = useRouter();
