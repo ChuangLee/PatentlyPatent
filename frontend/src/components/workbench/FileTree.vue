@@ -830,6 +830,7 @@ function renderNodeTitle(node: AntdTreeNode) {
       :title="kbPreviewNode ? `📚 ${kbPreviewNode.name}（只读）` : '专利知识'"
       :footer="null"
       width="80vw"
+      wrap-class-name="pp-kb-modal"
       :body-style="{ maxHeight: '78vh', overflow: 'auto', padding: '16px 20px' }"
     >
       <div v-if="kbPreviewLoading" style="text-align:center;padding:40px;color:#999">加载中…</div>
@@ -863,24 +864,50 @@ function renderNodeTitle(node: AntdTreeNode) {
 <style scoped>
 .pp-tree-node {
   user-select: none;
+  font-size: var(--pp-font-size-sm);
 }
 .pp-toolbar {
   display: flex;
   align-items: center;
-  gap: 2px;
-  padding: 4px 6px;
-  border-bottom: 1px solid #eee;
+  gap: var(--pp-space-1);
+  padding: var(--pp-space-2) var(--pp-space-3);
+  border-bottom: 1px solid var(--pp-color-border-soft);
+  background: var(--pp-color-bg);
+}
+.pp-toolbar :deep(.ant-btn-text) {
+  border-radius: var(--pp-radius-sm);
+  transition: var(--pp-transition-fast);
+}
+.pp-toolbar :deep(.ant-btn-text:hover) {
+  background: var(--pp-color-primary-soft) !important;
+  color: var(--pp-color-primary) !important;
 }
 .pp-active {
-  background: #e6f0ff !important;
-  color: #1677ff !important;
+  background: var(--pp-color-primary-soft) !important;
+  color: var(--pp-color-primary) !important;
 }
-/* 拖拽过程：当前文件夹高亮 */
+/* 选中节点高亮（primary-soft + 左侧 3px 竖线） */
+:deep(.ant-tree .ant-tree-treenode-selected .ant-tree-node-content-wrapper),
+:deep(.ant-tree .ant-tree-node-content-wrapper.ant-tree-node-selected) {
+  background: var(--pp-color-primary-soft) !important;
+  box-shadow: inset 3px 0 0 0 var(--pp-color-primary);
+  border-radius: var(--pp-radius-sm);
+}
+:deep(.ant-tree .ant-tree-node-content-wrapper) {
+  font-size: var(--pp-font-size-sm);
+  padding: 2px var(--pp-space-2);
+  border-radius: var(--pp-radius-sm);
+  transition: var(--pp-transition-fast);
+}
+:deep(.ant-tree .ant-tree-node-content-wrapper:hover) {
+  background: var(--pp-color-surface-hover) !important;
+}
+/* 拖拽过程：当前文件夹高亮 → 改为 primary-soft 蓝色 */
 .pp-drag-over {
-  background: #fff7e6 !important;
-  border: 2px dashed #faad14 !important;
-  border-radius: 4px;
-  padding: 0 4px;
+  background: var(--pp-color-primary-soft) !important;
+  border: 2px dashed var(--pp-color-primary) !important;
+  border-radius: var(--pp-radius-sm);
+  padding: 0 var(--pp-space-1);
 }
 .pp-tree-dragging {
   /* 拖拽进行中给整个 tree 一点提示 */
@@ -889,12 +916,12 @@ function renderNodeTitle(node: AntdTreeNode) {
 /* 原生拖拽（OS 文件 → 树容器）批上传视觉反馈 */
 .pp-tree-dropzone {
   border: 2px dashed transparent;
-  border-radius: 6px;
-  transition: border-color 0.15s, background-color 0.15s;
+  border-radius: var(--pp-radius-md);
+  transition: border-color var(--pp-transition-fast), background-color var(--pp-transition-fast);
 }
 .pp-tree-drop-active {
-  border-color: #1677ff;
-  background-color: #e6f4ff;
+  border-color: var(--pp-color-primary);
+  background-color: var(--pp-color-primary-soft);
 }
 .pp-tree-drop-overlay {
   position: absolute;
@@ -903,18 +930,18 @@ function renderNodeTitle(node: AntdTreeNode) {
   display: flex;
   align-items: center;
   justify-content: center;
-  background: rgba(230, 244, 255, 0.55);
-  border-radius: 4px;
+  background: rgba(91, 108, 255, 0.10);
+  border-radius: var(--pp-radius-md);
   z-index: 5;
 }
 .pp-tree-drop-hint {
-  background: #1677ff;
-  color: #fff;
-  font-size: 13px;
-  font-weight: 500;
-  padding: 6px 14px;
-  border-radius: 16px;
-  box-shadow: 0 2px 8px rgba(22, 119, 255, 0.35);
+  background: var(--pp-color-primary);
+  color: var(--pp-color-text-inverse);
+  font-size: var(--pp-font-size-sm);
+  font-weight: var(--pp-font-weight-medium);
+  padding: var(--pp-space-2) var(--pp-space-4);
+  border-radius: var(--pp-radius-full);
+  box-shadow: var(--pp-shadow-md);
 }
 /* v0.14-B: 上传进度叠层 */
 .pp-tree-upload-overlay {
@@ -924,28 +951,28 @@ function renderNodeTitle(node: AntdTreeNode) {
   align-items: center;
   justify-content: center;
   background: rgba(255, 255, 255, 0.85);
-  border-radius: 4px;
+  border-radius: var(--pp-radius-md);
   z-index: 6;
   pointer-events: all;
 }
 .pp-tree-upload-card {
-  background: #fff;
-  border: 1px solid #e6e6e6;
-  border-radius: 8px;
-  padding: 14px 16px;
+  background: var(--pp-color-surface);
+  border: 1px solid var(--pp-color-border-soft);
+  border-radius: var(--pp-radius-md);
+  padding: var(--pp-space-4);
   width: min(85%, 280px);
-  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.08);
+  box-shadow: var(--pp-shadow-lg);
 }
 .pp-tree-upload-title {
-  font-size: 12px;
-  color: #666;
-  font-weight: 600;
-  margin-bottom: 4px;
+  font-size: var(--pp-font-size-xs);
+  color: var(--pp-color-text-secondary);
+  font-weight: var(--pp-font-weight-semibold);
+  margin-bottom: var(--pp-space-1);
 }
 .pp-tree-upload-name {
-  font-size: 13px;
-  color: #1f1f1f;
-  margin-bottom: 8px;
+  font-size: var(--pp-font-size-sm);
+  color: var(--pp-color-text);
+  margin-bottom: var(--pp-space-2);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -953,11 +980,11 @@ function renderNodeTitle(node: AntdTreeNode) {
 /* v0.21 任务 4: agent spawn 节点闪烁高亮 */
 .pp-spawn-flash {
   animation: pp-spawn-flash-anim 1.6s ease-out;
-  border-radius: 4px;
+  border-radius: var(--pp-radius-sm);
 }
 @keyframes pp-spawn-flash-anim {
-  0%   { background: rgba(22, 119, 255, 0.45); box-shadow: 0 0 0 4px rgba(22, 119, 255, 0.35); }
-  60%  { background: rgba(22, 119, 255, 0.18); box-shadow: 0 0 0 2px rgba(22, 119, 255, 0.18); }
+  0%   { background: rgba(91, 108, 255, 0.45); box-shadow: 0 0 0 4px rgba(91, 108, 255, 0.35); }
+  60%  { background: rgba(91, 108, 255, 0.18); box-shadow: 0 0 0 2px rgba(91, 108, 255, 0.18); }
   100% { background: transparent; box-shadow: none; }
 }
 /* 多行显示：节点 title 换行 */
@@ -970,5 +997,29 @@ function renderNodeTitle(node: AntdTreeNode) {
 :deep(.pp-tree-wrap .pp-tree-node) {
   white-space: normal;
   word-break: break-all;
+}
+</style>
+
+<!-- v0.22 kb modal 全局样式（modal 渲染在 body 下，需脱 scoped） -->
+<style>
+.pp-kb-modal .ant-modal-content {
+  border-radius: var(--pp-radius-lg);
+  overflow: hidden;
+  box-shadow: var(--pp-shadow-xl);
+}
+.pp-kb-modal .ant-modal-header {
+  background: var(--pp-color-primary);
+  border-bottom: 0;
+  padding: var(--pp-space-3) var(--pp-space-5);
+}
+.pp-kb-modal .ant-modal-title {
+  color: var(--pp-color-text-inverse) !important;
+  font-weight: var(--pp-font-weight-semibold);
+}
+.pp-kb-modal .ant-modal-close {
+  color: var(--pp-color-text-inverse);
+}
+.pp-kb-modal .ant-modal-close:hover {
+  color: var(--pp-color-primary-soft);
 }
 </style>

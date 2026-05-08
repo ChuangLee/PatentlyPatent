@@ -107,3 +107,27 @@
   --pp-warn: var(--pp-color-warning);
   --pp-danger: var(--pp-color-danger);
 }
+
+/* ============================================================
+ * 暗色模式（v0.24-D 首版实装：仅覆盖关键 token，先有可切换基础）
+ * 通过 <html data-theme="dark"> 触发，App.vue watch ui.theme 同步
+ * ============================================================ */
+:root[data-theme='dark'] {
+  --pp-color-bg: #0F172A;             /* slate-900 */
+  --pp-color-bg-elevated: #1E293B;    /* slate-800 */
+  --pp-color-surface: #1E293B;        /* slate-800 */
+  --pp-color-surface-hover: #273449;
+  --pp-color-border: #334155;         /* slate-700 */
+  --pp-color-border-soft: #1E293B;    /* slate-800 */
+  --pp-color-border-strong: #475569;
+  --pp-color-text: #F1F5F9;           /* slate-100 */
+  --pp-color-text-secondary: #94A3B8; /* slate-400 */
+  --pp-color-text-tertiary: #64748B;  /* slate-500 */
+  --pp-color-text-disabled: #475569;
+  --pp-color-primary-soft: #312E81;   /* indigo-900 暗紫 */
+  --pp-color-primary-soft-hover: #3730A3;
+  --pp-color-success-soft: #064E3B;
+  --pp-color-warning-soft: #78350F;
+  --pp-color-danger-soft: #7F1D1D;
+  --pp-color-info-soft: #1E3A8A;
+}

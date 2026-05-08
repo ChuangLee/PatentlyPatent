@@ -191,7 +191,9 @@ function onCancel() {
   <a-modal :open="open" @update:open="(v: boolean) => emit('update:open', v)"
            title="新建创新报门（提交你的创意，启动专利挖掘）" width="780" :ok-text="`确定 (${attachmentCount} 项资料)`"
            :ok-button-props="{ loading: submitting }"
-           @ok="onOk" @cancel="onCancel" :mask-closable="false">
+           @ok="onOk" @cancel="onCancel" :mask-closable="false"
+           class="pp-newproj-modal"
+           wrap-class-name="pp-newproj-wrap">
 
     <a-form layout="vertical">
       <!-- 大文件上传区 -->
@@ -290,45 +292,104 @@ function onCancel() {
 </template>
 
 <style scoped>
+/* 上传 hero 区：primary-soft 底 + dashed primary 边 + radius-lg */
 .pp-upload-hero {
-  background: #fafbff;
-  border: 1px dashed #c2c8ff;
-  border-radius: 8px;
-  padding: 16px;
+  background: var(--pp-color-primary-soft);
+  border: 1px dashed var(--pp-color-primary);
+  border-radius: var(--pp-radius-lg);
+  padding: var(--pp-space-4);
 }
 .pp-newproj-upload-wrap {
   position: relative;
 }
+/* 进度叠层：用 token 色和 radius */
 .pp-newproj-progress-overlay {
   position: absolute;
   inset: 0;
   display: flex;
   align-items: center;
   justify-content: center;
-  background: rgba(255, 255, 255, 0.85);
-  border-radius: 4px;
+  background: rgba(255, 255, 255, 0.88);
+  border-radius: var(--pp-radius-md);
   z-index: 6;
+  backdrop-filter: blur(2px);
 }
 .pp-newproj-progress-card {
-  background: #fff;
-  border: 1px solid #e6e6e6;
-  border-radius: 8px;
+  background: var(--pp-color-surface);
+  border: 1px solid var(--pp-color-border-soft);
+  border-radius: var(--pp-radius-lg);
   padding: 14px 16px;
   width: min(85%, 320px);
-  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.08);
+  box-shadow: var(--pp-shadow-lg);
 }
 .pp-newproj-progress-title {
-  font-size: 12px;
-  color: #666;
-  font-weight: 600;
+  font-size: var(--pp-font-size-xs);
+  color: var(--pp-color-text-secondary);
+  font-weight: var(--pp-font-weight-semibold);
   margin-bottom: 4px;
 }
 .pp-newproj-progress-name {
-  font-size: 13px;
-  color: #1f1f1f;
+  font-size: var(--pp-font-size-sm);
+  color: var(--pp-color-text);
   margin-bottom: 8px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+</style>
+
+<!-- 非 scoped 全局样式：a-modal 由 ant-design-vue 通过 teleport 渲染到 body -->
+<style>
+/* modal 容器：radius-lg + shadow-xl + 顶部 24px 渐变条 */
+.pp-newproj-wrap .ant-modal-content {
+  border-radius: var(--pp-radius-lg);
+  box-shadow: var(--pp-shadow-xl);
+  overflow: hidden;
+  padding: 0;
+  position: relative;
+}
+.pp-newproj-wrap .ant-modal-content::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 24px;
+  background: linear-gradient(135deg, var(--pp-color-primary) 0%, #8B5CF6 50%, #EC4899 100%);
+  z-index: 1;
+}
+.pp-newproj-wrap .ant-modal-header {
+  padding: calc(24px + var(--pp-space-4)) var(--pp-space-5) var(--pp-space-3);
+  margin-bottom: 0;
+  border-bottom: 1px solid var(--pp-color-border-soft);
+  border-radius: 0;
+}
+.pp-newproj-wrap .ant-modal-title {
+  font-size: var(--pp-font-size-lg);
+  font-weight: var(--pp-font-weight-semibold);
+  color: var(--pp-color-text);
+}
+.pp-newproj-wrap .ant-modal-body {
+  padding: var(--pp-space-5);
+}
+.pp-newproj-wrap .ant-modal-footer {
+  padding: var(--pp-space-3) var(--pp-space-5);
+  border-top: 1px solid var(--pp-color-border-soft);
+}
+
+/* 表单分组分隔 divider */
+.pp-newproj-wrap .ant-divider {
+  border-color: var(--pp-color-border-soft);
+  margin: var(--pp-space-4) 0;
+}
+
+/* a-select-option 内 stage 选项：选中状态浅紫底 + primary 边 */
+.pp-newproj-wrap .ant-select-item-option-selected:not(.ant-select-item-option-disabled) {
+  background: var(--pp-color-primary-soft);
+  color: var(--pp-color-primary);
+  font-weight: var(--pp-font-weight-medium);
+}
+.pp-newproj-wrap .ant-select-item-option-active:not(.ant-select-item-option-disabled) {
+  background: var(--pp-color-primary-soft-hover);
 }
 </style>

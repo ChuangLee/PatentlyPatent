@@ -8,7 +8,6 @@ import { chatApi } from '@/api/chat';
 import Button from 'ant-design-vue/es/button';
 import Input from 'ant-design-vue/es/input';
 import Segmented from 'ant-design-vue/es/segmented';
-import Tag from 'ant-design-vue/es/tag';
 import Collapse from 'ant-design-vue/es/collapse';
 import Spin from 'ant-design-vue/es/spin';
 
@@ -16,6 +15,15 @@ const CollapsePanel = Collapse.Panel;
 
 function fmtToolInput(v: unknown): string {
   try { return JSON.stringify(v, null, 2); } catch { return String(v); }
+}
+
+function fmtTs(ts: string): string {
+  try {
+    const d = new Date(ts);
+    if (isNaN(d.getTime())) return ts;
+    const pad = (n: number) => String(n).padStart(2, '0');
+    return `${pad(d.getHours())}:${pad(d.getMinutes())}`;
+  } catch { return ts; }
 }
 
 const props = defineProps<{ projectId: string; round: number }>();
@@ -200,92 +208,85 @@ defineExpose({ autoMine, mineFull });
 </script>
 
 <template>
-  <div style="display:flex;flex-direction:column;height:100%">
-    <div ref="containerRef" style="flex:1;overflow-y:auto;padding:16px;background:#fafafa">
-      <div v-if="chat.messages.length === 0" style="color:#aaa;text-align:center;padding-top:80px">
+  <div class="pp-chat-root">
+    <div ref="containerRef" class="pp-chat-stream">
+      <div v-if="chat.messages.length === 0" class="pp-chat-empty">
         尚未开始对话——发送第一条消息让 AI 开始引导。
       </div>
       <template v-for="m in chat.messages" :key="m.id">
         <!-- text bubble（默认；老数据 type 为 undefined 也走这里） -->
         <div v-if="(m.type ?? 'text') === 'text'"
-             :style="{
-               marginBottom: '12px',
-               display:'flex',
-               justifyContent: m.role === 'user' ? 'flex-end' : 'flex-start',
-             }">
-          <div :style="{
-            maxWidth: '70%',
-            background: m.role === 'user' ? '#1677ff' : '#fff',
-            color: m.role === 'user' ? '#fff' : '#1f2937',
-            padding: '10px 14px', borderRadius: '12px',
-            whiteSpace: 'pre-wrap', boxShadow: '0 1px 2px rgba(0,0,0,.06)',
-          }">
-            <span>{{ m.content }}</span>
-            <span v-if="m.role === 'agent' && chat.streaming
-                        && m.id === chat.messages[chat.messages.length-1].id"
-                  style="opacity:.4">|</span>
+             class="pp-chat-row"
+             :class="m.role === 'user' ? 'pp-chat-row-user' : 'pp-chat-row-agent'">
+          <!-- agent avatar：左侧 28px 渐变圆形 + 'AI' -->
+          <div v-if="m.role !== 'user'" class="pp-chat-avatar" aria-hidden="true">AI</div>
+
+          <div class="pp-chat-bubble-wrap">
+            <div class="pp-chat-bubble"
+                 :class="m.role === 'user' ? 'pp-chat-bubble-user' : 'pp-chat-bubble-agent'">
+              <span>{{ m.content }}</span>
+              <span v-if="m.role === 'agent' && chat.streaming
+                          && m.id === chat.messages[chat.messages.length-1].id"
+                    class="pp-chat-cursor">|</span>
+            </div>
+            <div v-if="m.ts" class="pp-chat-timestamp"
+                 :class="{ 'pp-chat-timestamp-right': m.role === 'user' }">
+              {{ fmtTs(m.ts) }}
+            </div>
           </div>
         </div>
 
-        <!-- tool_call 卡片（浅蓝；result 用 collapse 折叠） -->
+        <!-- tool_call 卡片（渐变 primary→pink；状态徽章；result 浅绿折叠） -->
         <div v-else-if="m.type === 'tool_call' && m.tool"
-             style="margin-bottom:10px;display:flex;justify-content:flex-start">
-          <div style="max-width:80%;width:100%;background:#f0f7ff;border:1px solid #d6e4ff;
-                      border-radius:8px;padding:8px 10px;font-size:12px">
-            <div style="display:flex;align-items:center;gap:6px;margin-bottom:4px">
-              <Tag color="processing" style="margin:0">🔧 {{ m.tool.name }}</Tag>
-              <span v-if="m.tool.tDurationMs != null" class="pp-tool-time">⏱ {{ m.tool.tDurationMs }}ms</span>
-              <span v-if="m.tool.result == null" style="color:#1677ff;font-size:11px;display:inline-flex;align-items:center;gap:4px">
+             class="pp-chat-row pp-chat-row-agent">
+          <div class="pp-tool-card">
+            <div class="pp-tool-head">
+              <span class="pp-tool-name">🔧 {{ m.tool.name }}</span>
+              <span v-if="(m.tool as any).status === 'error'"
+                    class="pp-tool-badge pp-tool-badge-danger">✗ 失败</span>
+              <span v-else-if="m.tool.result == null"
+                    class="pp-tool-badge pp-tool-badge-running">
                 <Spin size="small" />
-                运行中…
+                运行中
               </span>
-              <span v-else style="color:#52c41a;font-size:11px">✓ 完成</span>
+              <span v-else class="pp-tool-badge pp-tool-badge-success">✓ 完成</span>
+              <span v-if="m.tool.tDurationMs != null" class="pp-tool-time">⏱ {{ m.tool.tDurationMs }}ms</span>
             </div>
-            <Collapse :bordered="false" ghost size="small">
-              <CollapsePanel key="input" header="入参">
-                <pre style="margin:0;font-size:11px;white-space:pre-wrap;word-break:break-all">{{ fmtToolInput(m.tool.input) }}</pre>
+            <Collapse :bordered="false" ghost size="small" class="pp-tool-collapse">
+              <CollapsePanel key="input" header="入参" class="pp-tool-panel-input">
+                <pre class="pp-tool-pre">{{ fmtToolInput(m.tool.input) }}</pre>
               </CollapsePanel>
               <CollapsePanel v-if="m.tool.result != null" key="result" header="结果"
-                             :style="{ background: '#f6ffed' }">
-                <pre style="margin:0;font-size:11px;white-space:pre-wrap;word-break:break-all">{{ m.tool.result }}</pre>
+                             class="pp-tool-panel-result">
+                <pre class="pp-tool-pre">{{ m.tool.result }}</pre>
               </CollapsePanel>
             </Collapse>
           </div>
         </div>
 
         <!-- thinking：浅灰 italic -->
-        <div v-else-if="m.type === 'thinking'"
-             style="margin-bottom:8px;display:flex;justify-content:flex-start">
-          <div style="max-width:80%;color:#8c8c8c;font-style:italic;font-size:12px;
-                      padding:4px 10px;border-left:2px solid #d9d9d9;background:#fafafa;
-                      white-space:pre-wrap">
-            💭 {{ m.content }}
-          </div>
+        <div v-else-if="m.type === 'thinking'" class="pp-chat-row pp-chat-row-agent">
+          <div class="pp-chat-thinking">💭 {{ m.content }}</div>
         </div>
 
         <!-- error 卡片 -->
-        <div v-else-if="m.type === 'error'"
-             style="margin-bottom:10px;display:flex;justify-content:flex-start">
-          <div style="max-width:80%;background:#fff2f0;border:1px solid #ffccc7;
-                      color:#cf1322;border-radius:8px;padding:8px 12px;font-size:12px;
-                      white-space:pre-wrap">
-            ❌ {{ m.content }}
-          </div>
+        <div v-else-if="m.type === 'error'" class="pp-chat-row pp-chat-row-agent">
+          <div class="pp-chat-error">❌ {{ m.content }}</div>
         </div>
       </template>
     </div>
 
-    <div style="padding:12px;border-top:1px solid #eee;background:#fff">
+    <div class="pp-chat-composer">
       <!-- v0.17-D: admin 才能看到 agent 模式切换 -->
-      <div v-if="auth.role === 'admin'" style="margin-bottom:8px;display:flex;gap:8px;align-items:center;font-size:12px;color:#666">
+      <div v-if="auth.role === 'admin'" class="pp-chat-mode-row">
         <span>挖掘内核：</span>
         <Segmented :value="ui.agentMode"
                    :options="[{label:'老 mining',value:'mining'},{label:'Agent SDK',value:'agent_sdk'}]"
                    :disabled="chat.streaming"
                    @change="(v: any) => ui.setAgentMode(v as 'mining' | 'agent_sdk')" />
-        <span v-if="ui.agentMode === 'agent_sdk'" style="color:#1677ff">⚡ spike 端点</span>
+        <span v-if="ui.agentMode === 'agent_sdk'" class="pp-chat-mode-tip">⚡ spike 端点</span>
       </div>
-      <div style="display:flex;gap:8px">
+      <div class="pp-chat-input-row">
         <Input v-model:value="input" placeholder="描述你的发明，或回答 AI 的问题..."
                :disabled="chat.streaming" @press-enter="send" />
         <Button type="primary" :loading="chat.streaming" @click="send">发送</Button>
@@ -296,10 +297,255 @@ defineExpose({ autoMine, mineFull });
 </template>
 
 <style scoped>
-/* v0.20 Wave1 任务 2: tool_call 耗时小字 */
+/* ---------- 容器 ---------- */
+.pp-chat-root {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  font-family: var(--pp-font-sans);
+}
+.pp-chat-stream {
+  flex: 1;
+  overflow-y: auto;
+  padding: var(--pp-space-4);
+  background: var(--pp-color-bg);
+}
+.pp-chat-empty {
+  color: var(--pp-color-text-tertiary);
+  text-align: center;
+  padding-top: 80px;
+  font-size: var(--pp-font-size-sm);
+}
+
+/* ---------- 行容器（含 avatar + bubble） ---------- */
+.pp-chat-row {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--pp-space-2);
+  margin-bottom: var(--pp-space-4);
+}
+.pp-chat-row-user { justify-content: flex-end; }
+.pp-chat-row-agent { justify-content: flex-start; }
+
+/* ---------- agent avatar：28px 渐变圆 + 'AI' 字 ---------- */
+.pp-chat-avatar {
+  flex: none;
+  width: 28px;
+  height: 28px;
+  border-radius: var(--pp-radius-full);
+  background: linear-gradient(135deg, var(--pp-color-primary) 0%, #8B5CF6 50%, #EC4899 100%);
+  color: #fff;
+  font-size: 11px;
+  font-weight: var(--pp-font-weight-bold);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  letter-spacing: 0.5px;
+  box-shadow: var(--pp-shadow-sm);
+  margin-top: 2px;
+}
+
+/* ---------- bubble wrapper（含 timestamp） ---------- */
+.pp-chat-bubble-wrap {
+  display: flex;
+  flex-direction: column;
+  max-width: 70%;
+  min-width: 0;
+}
+
+/* ---------- bubble 主体 ---------- */
+.pp-chat-bubble {
+  position: relative;
+  padding: 10px 14px;
+  border-radius: var(--pp-radius-lg);
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-size: var(--pp-font-size-base);
+  line-height: var(--pp-line-height-normal);
+}
+
+/* user 气泡：渐变 indigo→violet + 白字 + 右下小三角 */
+.pp-chat-bubble-user {
+  background: linear-gradient(135deg, var(--pp-color-primary) 0%, #8B5CF6 100%);
+  color: var(--pp-color-text-inverse);
+  box-shadow: var(--pp-shadow-sm);
+}
+.pp-chat-bubble-user::after {
+  content: '';
+  position: absolute;
+  right: -6px;
+  bottom: 8px;
+  width: 0;
+  height: 0;
+  border-style: solid;
+  border-width: 6px 0 6px 8px;
+  border-color: transparent transparent transparent #8B5CF6;
+}
+
+/* agent 气泡：白底 + soft border */
+.pp-chat-bubble-agent {
+  background: var(--pp-color-surface);
+  color: var(--pp-color-text);
+  border: 1px solid var(--pp-color-border-soft);
+  box-shadow: var(--pp-shadow-sm);
+}
+
+/* streaming 闪烁光标 1s 循环 */
+.pp-chat-cursor {
+  display: inline-block;
+  margin-left: 2px;
+  animation: pp-chat-cursor-blink 1s ease-in-out infinite;
+  color: currentColor;
+  font-weight: var(--pp-font-weight-bold);
+}
+@keyframes pp-chat-cursor-blink {
+  0%, 100% { opacity: 0.4; }
+  50%      { opacity: 0.8; }
+}
+
+/* timestamp：浅灰 11px */
+.pp-chat-timestamp {
+  margin-top: 4px;
+  font-size: 11px;
+  color: var(--pp-color-text-tertiary);
+  font-variant-numeric: tabular-nums;
+}
+.pp-chat-timestamp-right { text-align: right; }
+
+/* ---------- tool_call 卡片 ---------- */
+.pp-tool-card {
+  max-width: 80%;
+  width: 100%;
+  background: linear-gradient(135deg, #EEF0FF 0%, #FCE7F3 100%);
+  border: 1px solid rgba(91, 108, 255, 0.2);
+  border-radius: var(--pp-radius-lg);
+  padding: 10px 12px;
+  font-size: var(--pp-font-size-xs);
+  box-shadow: var(--pp-shadow-sm);
+}
+.pp-tool-head {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+.pp-tool-name {
+  font-weight: var(--pp-font-weight-semibold);
+  color: var(--pp-color-text);
+  font-size: var(--pp-font-size-sm);
+}
+.pp-tool-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 1px 8px;
+  border-radius: var(--pp-radius-full);
+  font-size: 11px;
+  font-weight: var(--pp-font-weight-medium);
+  line-height: 18px;
+}
+.pp-tool-badge-running {
+  background: var(--pp-color-primary-soft);
+  color: var(--pp-color-primary);
+  border: 1px solid rgba(91, 108, 255, 0.25);
+}
+.pp-tool-badge-success {
+  background: var(--pp-color-success-soft);
+  color: var(--pp-color-success);
+  border: 1px solid rgba(16, 185, 129, 0.25);
+}
+.pp-tool-badge-danger {
+  background: var(--pp-color-danger-soft);
+  color: var(--pp-color-danger);
+  border: 1px solid rgba(239, 68, 68, 0.25);
+}
 .pp-tool-time {
-  color: #bfbfbf;
+  color: var(--pp-color-text-tertiary);
   font-size: 11px;
   font-variant-numeric: tabular-nums;
+  margin-left: auto;
+}
+
+/* tool collapse 面板：白底/浅绿 + monospace */
+.pp-tool-collapse :deep(.ant-collapse-item) {
+  border-bottom: none;
+  margin-bottom: 6px;
+}
+.pp-tool-collapse :deep(.ant-collapse-header) {
+  padding: 4px 8px !important;
+  font-size: 12px;
+  border-radius: var(--pp-radius-md);
+  color: var(--pp-color-text-secondary);
+}
+.pp-tool-collapse :deep(.ant-collapse-content) {
+  border-radius: var(--pp-radius-md);
+  overflow: hidden;
+}
+.pp-tool-collapse :deep(.ant-collapse-content-box) {
+  padding: 8px 10px !important;
+}
+.pp-tool-panel-input :deep(.ant-collapse-content) {
+  background: var(--pp-color-surface);
+  border: 1px solid var(--pp-color-border-soft);
+}
+.pp-tool-panel-result :deep(.ant-collapse-content) {
+  background: #F0FDF4;
+  border: 1px solid rgba(16, 185, 129, 0.2);
+}
+.pp-tool-pre {
+  margin: 0;
+  font-family: var(--pp-font-mono);
+  font-size: 12px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  word-break: break-all;
+  color: var(--pp-color-text);
+}
+
+/* ---------- thinking ---------- */
+.pp-chat-thinking {
+  max-width: 80%;
+  color: var(--pp-color-text-secondary);
+  font-style: italic;
+  font-size: var(--pp-font-size-xs);
+  padding: 4px 10px;
+  border-left: 2px solid var(--pp-color-border-strong);
+  background: var(--pp-color-bg-elevated);
+  border-radius: var(--pp-radius-sm);
+  white-space: pre-wrap;
+}
+
+/* ---------- error ---------- */
+.pp-chat-error {
+  max-width: 80%;
+  background: var(--pp-color-danger-soft);
+  border: 1px solid rgba(239, 68, 68, 0.25);
+  color: var(--pp-color-danger);
+  border-radius: var(--pp-radius-lg);
+  padding: 8px 12px;
+  font-size: var(--pp-font-size-xs);
+  white-space: pre-wrap;
+  box-shadow: var(--pp-shadow-sm);
+}
+
+/* ---------- composer 输入区 ---------- */
+.pp-chat-composer {
+  padding: var(--pp-space-3);
+  border-top: 1px solid var(--pp-color-border-soft);
+  background: var(--pp-color-surface);
+}
+.pp-chat-mode-row {
+  margin-bottom: var(--pp-space-2);
+  display: flex;
+  gap: var(--pp-space-2);
+  align-items: center;
+  font-size: var(--pp-font-size-xs);
+  color: var(--pp-color-text-secondary);
+}
+.pp-chat-mode-tip { color: var(--pp-color-primary); }
+.pp-chat-input-row {
+  display: flex;
+  gap: var(--pp-space-2);
 }
 </style>

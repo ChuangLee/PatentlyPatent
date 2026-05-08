@@ -168,6 +168,39 @@ function onMenuClick({ key }: { key: string }) {
 // Header 当前页面标题
 const currentTitle = computed(() => (route.meta?.title as string) || '');
 
+// 面包屑：基于 route.path 与已加载的 myProjects 动态生成
+interface Crumb { label: string; path?: string }
+const HOME_PATH = computed(() => (auth.role === 'admin' ? '/admin/dashboard' : '/employee/dashboard'));
+
+const breadcrumbs = computed<Crumb[]>(() => {
+  const path = route.path;
+  // dashboard 自身：仅显示「首页」（最后一段）
+  if (path.startsWith('/employee/dashboard') || path.startsWith('/admin/dashboard')) {
+    return [{ label: '首页' }];
+  }
+  const list: Crumb[] = [{ label: '首页', path: HOME_PATH.value }];
+  if (path.startsWith('/employee/projects')) {
+    list.push({ label: '项目', path: '/employee/dashboard' });
+    if (currentProjectId.value) {
+      const p = myProjects.value.find(x => x.id === currentProjectId.value);
+      list.push({ label: p?.title || '项目详情' });
+    } else if (path.includes('/projects/new')) {
+      list.push({ label: '新建项目' });
+    }
+    return list;
+  }
+  if (path.startsWith('/admin/projects')) {
+    list.push({ label: '全量项目' });
+    return list;
+  }
+  if (currentTitle.value) list.push({ label: currentTitle.value });
+  return list;
+});
+
+function goCrumb(c: Crumb) {
+  if (c.path) router.push(c.path);
+}
+
 // 用户首字母 avatar
 const avatarLetter = computed(() => {
   const n = auth.user?.name || '';
@@ -339,6 +372,20 @@ const APP_VERSION = 'v0.23';
           </span>
           <span v-if="currentTitle" class="pp-header__sep">›</span>
           <span v-if="currentTitle" class="pp-header__page">{{ currentTitle }}</span>
+          <nav v-if="breadcrumbs.length > 0" class="pp-crumbs" aria-label="breadcrumb">
+            <template v-for="(c, i) in breadcrumbs" :key="i">
+              <span v-if="i > 0" class="pp-crumbs__sep">›</span>
+              <a
+                v-if="c.path && i !== breadcrumbs.length - 1"
+                class="pp-crumbs__item pp-crumbs__link"
+                @click="goCrumb(c)"
+              >{{ c.label }}</a>
+              <span
+                v-else
+                class="pp-crumbs__item pp-crumbs__current"
+              >{{ c.label }}</span>
+            </template>
+          </nav>
         </div>
 
         <div class="pp-header__right">
@@ -351,6 +398,14 @@ const APP_VERSION = 'v0.23';
             />
             <span class="pp-header__search-kbd">⌘K</span>
           </div>
+
+          <button
+            class="pp-header__icon-btn"
+            :title="ui.theme === 'dark' ? '切换到浅色模式' : '切换到深色模式'"
+            @click="ui.toggleTheme()"
+          >
+            {{ ui.theme === 'dark' ? '☀️' : '🌙' }}
+          </button>
 
           <button class="pp-header__icon-btn" title="通知">
             🔔
@@ -694,6 +749,45 @@ const APP_VERSION = 'v0.23';
   color: var(--pp-color-text-secondary);
   font-size: 13px;
   font-weight: 500;
+}
+
+/* ---------- 面包屑 ---------- */
+.pp-crumbs {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-left: 6px;
+  font-size: 12px;
+  color: var(--pp-color-text-tertiary);
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.pp-crumbs__sep {
+  color: var(--pp-color-text-tertiary);
+  user-select: none;
+}
+.pp-crumbs__item {
+  display: inline-block;
+  max-width: 220px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  vertical-align: bottom;
+}
+.pp-crumbs__link {
+  color: var(--pp-color-text-tertiary);
+  cursor: pointer;
+  transition: color var(--pp-transition-fast);
+}
+.pp-crumbs__link:hover {
+  color: var(--pp-color-primary);
+}
+.pp-crumbs__current {
+  color: var(--pp-color-text-secondary);
+  font-weight: 500;
+  cursor: default;
 }
 
 .pp-header__right {

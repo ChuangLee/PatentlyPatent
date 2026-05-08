@@ -8,6 +8,54 @@ import type { Project, ProjectStatus, Patentability } from '@/types';
 let _echartsP: Promise<typeof import('echarts')> | null = null;
 const getEcharts = () => (_echartsP ??= import('echarts'));
 
+// v0.24-C: PatentlyPatent echarts 主题（token 色统一）
+// 6 色循环 palette：indigo / violet / pink / emerald / amber / blue
+const PP_PALETTE = ['#5B6CFF', '#8B5CF6', '#EC4899', '#10B981', '#F59E0B', '#3B82F6'];
+const PP_FONT_SANS = "'Inter', 'PingFang SC', 'Noto Sans SC', -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Microsoft YaHei', sans-serif";
+const PP_ECHARTS_THEME = {
+  color: PP_PALETTE,
+  textStyle: {
+    fontFamily: PP_FONT_SANS,
+    fontSize: 14,
+    color: '#111827',
+  },
+  title: {
+    textStyle: {
+      fontFamily: PP_FONT_SANS,
+      fontSize: 14,
+      fontWeight: 600,
+      color: '#5B6CFF',
+    },
+  },
+  tooltip: {
+    backgroundColor: '#FFFFFF',
+    borderColor: '#E5E7EB',
+    borderWidth: 1,
+    textStyle: { color: '#111827', fontFamily: PP_FONT_SANS, fontSize: 13 },
+    extraCssText: 'border-radius: 10px; box-shadow: 0 4px 6px -1px rgba(17,24,39,0.06), 0 2px 4px -2px rgba(17,24,39,0.04);',
+  },
+  axisLine: { lineStyle: { color: 'rgba(229,231,235,0.6)' } },
+  splitLine: { lineStyle: { color: 'rgba(229,231,235,0.6)' } },
+};
+
+// 给单个 setOption 注入主题（merge 而非替换）
+function withTheme<T extends Record<string, any>>(opt: T): T {
+  return {
+    color: PP_PALETTE,
+    textStyle: PP_ECHARTS_THEME.textStyle,
+    ...opt,
+    title: opt.title
+      ? {
+          ...opt.title,
+          textStyle: { ...PP_ECHARTS_THEME.title.textStyle, ...((opt.title as any).textStyle || {}) },
+        }
+      : undefined,
+    tooltip: opt.tooltip
+      ? { ...PP_ECHARTS_THEME.tooltip, ...opt.tooltip }
+      : PP_ECHARTS_THEME.tooltip,
+  } as T;
+}
+
 const projects = ref<Project[]>([]);
 const statusChartRef = ref<HTMLDivElement | null>(null);
 const patChartRef = ref<HTMLDivElement | null>(null);
@@ -46,24 +94,31 @@ watch(stats, () => drawCharts(), { deep: true });
 async function drawCharts() {
   const echarts = await getEcharts();
   if (statusChartRef.value) {
-    echarts.init(statusChartRef.value).setOption({
+    echarts.init(statusChartRef.value).setOption(withTheme({
       title: { text: '项目状态分布', left: 'center' },
       tooltip: { trigger: 'item' },
-      legend: { bottom: 0 },
+      legend: { bottom: 0, textStyle: { fontFamily: PP_FONT_SANS } },
       series: [{
         type: 'pie', radius: '60%',
         data: Object.entries(stats.value.byStatus).map(([n, v]) => ({ name: n, value: v })),
       }],
-    });
+    }));
   }
   if (patChartRef.value) {
-    echarts.init(patChartRef.value).setOption({
+    echarts.init(patChartRef.value).setOption(withTheme({
       title: { text: '专利性结论分布', left: 'center' },
       tooltip: {},
-      xAxis: { type: 'category', data: Object.keys(stats.value.byPat) },
-      yAxis: { type: 'value' },
-      series: [{ type: 'bar', data: Object.values(stats.value.byPat), itemStyle: { color: '#1677ff' } }],
-    });
+      xAxis: {
+        type: 'category',
+        data: Object.keys(stats.value.byPat),
+        axisLine: { lineStyle: { color: 'rgba(229,231,235,0.6)' } },
+      },
+      yAxis: {
+        type: 'value',
+        splitLine: { lineStyle: { color: 'rgba(229,231,235,0.6)' } },
+      },
+      series: [{ type: 'bar', data: Object.values(stats.value.byPat), itemStyle: { color: '#5B6CFF' } }],
+    }));
   }
 }
 
@@ -245,13 +300,13 @@ async function drawRunsCharts() {
         r.total_cost_usd ?? 0,
       ]);
     }
-    const PALETTE = ['#1677ff', '#16a34a', '#fa8c16', '#722ed1', '#13c2c2', '#eb2f96'];
     const series = Object.entries(byEndpoint).map(([name, data], i) => ({
       name,
       type: 'line' as const,
       smooth: true,
       data,
-      itemStyle: { color: PALETTE[i % PALETTE.length] },
+      itemStyle: { color: PP_PALETTE[i % PP_PALETTE.length] },
+      lineStyle: { color: PP_PALETTE[i % PP_PALETTE.length], width: 2 },
       markPoint: {
         symbol: 'circle',
         symbolSize: 8,
@@ -260,19 +315,23 @@ async function drawRunsCharts() {
           .map(r => ({
             name: r.fallback_used ? 'fallback' : 'mock',
             coord: [r.created_at || '', r.total_cost_usd ?? 0],
-            itemStyle: { color: r.fallback_used ? '#cf1322' : '#bfbfbf' },
+            itemStyle: { color: r.fallback_used ? '#EF4444' : '#9CA3AF' },
           })),
       },
     }));
-    inst.setOption({
-      title: { text: 'cost over time（按 endpoint 分系列）', left: 'center', textStyle: { fontSize: 13 } },
+    inst.setOption(withTheme({
+      title: { text: 'cost over time（按 endpoint 分系列）', left: 'center' },
       tooltip: { trigger: 'axis' },
-      legend: { bottom: 0, type: 'scroll' },
+      legend: { bottom: 0, type: 'scroll', textStyle: { fontFamily: PP_FONT_SANS } },
       grid: { left: 50, right: 20, top: 36, bottom: 36 },
-      xAxis: { type: 'time' },
-      yAxis: { type: 'value', name: 'USD', axisLabel: { formatter: (v: number) => v.toFixed(4) } },
+      xAxis: { type: 'time', axisLine: { lineStyle: { color: 'rgba(229,231,235,0.6)' } } },
+      yAxis: {
+        type: 'value', name: 'USD',
+        axisLabel: { formatter: (v: number) => v.toFixed(4) },
+        splitLine: { lineStyle: { color: 'rgba(229,231,235,0.6)' } },
+      },
       series,
-    });
+    }));
   }
 
   // ── v0.21 任务 3: error 数随时间柱图（最近 24 小时按小时 bucket）
@@ -304,20 +363,27 @@ async function drawRunsCharts() {
       const idx = Math.floor((t - startMs) / 3600_000);
       if (idx >= 0 && idx < HOURS) counts[idx] += 1;
     }
-    inst.setOption({
-      title: { text: 'error / fallback 数随时间（最近 24h，按小时）', left: 'center', textStyle: { fontSize: 13 } },
+    inst.setOption(withTheme({
+      title: { text: 'error / fallback 数随时间（最近 24h，按小时）', left: 'center' },
       tooltip: { trigger: 'axis', axisPointer: { type: 'shadow' } },
       grid: { left: 50, right: 20, top: 36, bottom: 28 },
-      xAxis: { type: 'category', data: labels, axisLabel: { fontSize: 10 } },
-      yAxis: { type: 'value', name: '次数', minInterval: 1 },
+      xAxis: {
+        type: 'category', data: labels,
+        axisLabel: { fontSize: 10, fontFamily: PP_FONT_SANS },
+        axisLine: { lineStyle: { color: 'rgba(229,231,235,0.6)' } },
+      },
+      yAxis: {
+        type: 'value', name: '次数', minInterval: 1,
+        splitLine: { lineStyle: { color: 'rgba(229,231,235,0.6)' } },
+      },
       series: [{
         name: 'error+fallback',
         type: 'bar',
         data: counts,
-        itemStyle: { color: '#cf1322' },
+        itemStyle: { color: '#EF4444', borderRadius: [4, 4, 0, 0] },
         barMaxWidth: 18,
       }],
-    });
+    }));
   }
 
   // ── 2) fallback / error 率 分组柱图
@@ -333,19 +399,25 @@ async function drawRunsCharts() {
       else counts[ep].ok += 1;
     }
     const endpoints = Object.keys(counts);
-    inst.setOption({
-      title: { text: '按端点统计 fallback / error 率', left: 'center', textStyle: { fontSize: 13 } },
+    inst.setOption(withTheme({
+      title: { text: '按端点统计 fallback / error 率', left: 'center' },
       tooltip: { trigger: 'axis', axisPointer: { type: 'shadow' } },
-      legend: { bottom: 0 },
+      legend: { bottom: 0, textStyle: { fontFamily: PP_FONT_SANS } },
       grid: { left: 50, right: 20, top: 36, bottom: 36 },
-      xAxis: { type: 'category', data: endpoints },
-      yAxis: { type: 'value', name: '次数' },
+      xAxis: {
+        type: 'category', data: endpoints,
+        axisLine: { lineStyle: { color: 'rgba(229,231,235,0.6)' } },
+      },
+      yAxis: {
+        type: 'value', name: '次数',
+        splitLine: { lineStyle: { color: 'rgba(229,231,235,0.6)' } },
+      },
       series: [
-        { name: 'ok', type: 'bar', stack: 'total', data: endpoints.map(e => counts[e].ok), itemStyle: { color: '#16a34a' } },
-        { name: 'fallback', type: 'bar', stack: 'total', data: endpoints.map(e => counts[e].fallback), itemStyle: { color: '#fa8c16' } },
-        { name: 'error', type: 'bar', stack: 'total', data: endpoints.map(e => counts[e].error), itemStyle: { color: '#cf1322' } },
+        { name: 'ok', type: 'bar', stack: 'total', data: endpoints.map(e => counts[e].ok), itemStyle: { color: '#10B981' } },
+        { name: 'fallback', type: 'bar', stack: 'total', data: endpoints.map(e => counts[e].fallback), itemStyle: { color: '#F59E0B' } },
+        { name: 'error', type: 'bar', stack: 'total', data: endpoints.map(e => counts[e].error), itemStyle: { color: '#EF4444' } },
       ],
-    });
+    }));
   }
 }
 
@@ -374,48 +446,56 @@ async function runAbCompare() {
 </script>
 
 <template>
-  <a-page-header title="管理员总览" sub-title="全公司创新挖掘活动一览" />
+  <div class="pp-admin-dashboard">
+    <!-- 顶部欢迎 / 标题（pp-card 化） -->
+    <div class="pp-card pp-admin-header">
+      <a-page-header title="管理员总览" sub-title="全公司创新挖掘活动一览" :ghost="false" style="background:transparent;padding:0" />
+    </div>
 
-  <a-row :gutter="16">
-    <a-col :span="12">
-      <a-card>
-        <div ref="statusChartRef" style="height:300px"></div>
-      </a-card>
-    </a-col>
-    <a-col :span="12">
-      <a-card>
-        <div ref="patChartRef" style="height:300px"></div>
-      </a-card>
-    </a-col>
-  </a-row>
+    <a-row :gutter="16">
+      <a-col :span="12">
+        <div class="pp-card pp-card-hover pp-chart-card">
+          <div ref="statusChartRef" style="height:300px"></div>
+        </div>
+      </a-col>
+      <a-col :span="12">
+        <div class="pp-card pp-card-hover pp-chart-card">
+          <div ref="patChartRef" style="height:300px"></div>
+        </div>
+      </a-col>
+    </a-row>
 
-  <a-row :gutter="16" style="margin-top:16px">
-    <a-col :span="6">
-      <a-card><a-statistic title="项目总数" :value="projects.length" /></a-card>
-    </a-col>
-    <a-col :span="6">
-      <a-card>
-        <a-statistic title="智慧芽配额"
-                     :value="42" suffix="/ 100" :value-style="{ color: '#16a34a' }" />
-      </a-card>
-    </a-col>
-    <a-col :span="6">
-      <a-card>
-        <a-statistic title="LLM tokens (今日)"
-                     :value="183_240" :value-style="{ color: '#1677ff' }" />
-      </a-card>
-    </a-col>
-    <a-col :span="6">
-      <a-card>
-        <a-statistic title="已完成（已导出）"
-                     :value="(stats.byStatus['已完成（已导出）'] ?? 0)"
-                     :value-style="{ color: '#16a34a' }" />
-      </a-card>
-    </a-col>
-  </a-row>
+    <a-row :gutter="16" style="margin-top:16px">
+      <a-col :span="6">
+        <div class="pp-card pp-card-hover pp-stat-card">
+          <div class="pp-stat-card__label">项目总数</div>
+          <div class="pp-stat-card__value">{{ projects.length }}</div>
+        </div>
+      </a-col>
+      <a-col :span="6">
+        <div class="pp-card pp-card-hover pp-stat-card">
+          <div class="pp-stat-card__label">智慧芽配额</div>
+          <div class="pp-stat-card__value">
+            42<span class="pp-stat-card__suffix"> / 100</span>
+          </div>
+        </div>
+      </a-col>
+      <a-col :span="6">
+        <div class="pp-card pp-card-hover pp-stat-card">
+          <div class="pp-stat-card__label">LLM tokens (今日)</div>
+          <div class="pp-stat-card__value">183,240</div>
+        </div>
+      </a-col>
+      <a-col :span="6">
+        <div class="pp-card pp-card-hover pp-stat-card">
+          <div class="pp-stat-card__label">已完成（已导出）</div>
+          <div class="pp-stat-card__value">{{ (stats.byStatus['已完成（已导出）'] ?? 0) }}</div>
+        </div>
+      </a-col>
+    </a-row>
 
   <!-- v0.18-D + v0.19-A: prior_art A/B 对比 + N 次回归 -->
-  <a-card style="margin-top:16px" title="⚗️ prior_art A/B 对比（mining 老路径 vs agent 路径）">
+  <a-card class="pp-section-card" style="margin-top:16px" title="⚗️ prior_art A/B 对比（mining 老路径 vs agent 路径）">
     <a-space wrap>
       <a-input v-model:value="abPid" placeholder="项目 id (如 p-xxxxxxxx)" style="width:240px" />
       <a-input v-model:value="abIdea" placeholder="idea 文本" style="width:360px" />
@@ -479,7 +559,7 @@ async function runAbCompare() {
   </a-modal>
 
   <!-- v0.20 Wave1: agent_runs 监控视图 -->
-  <a-card style="margin-top:16px" title="📊 Agent Runs (最近 N 条)">
+  <a-card class="pp-section-card pp-runs-card" style="margin-top:16px" title="📊 Agent Runs (最近 N 条)">
     <template #extra>
       <a-button :loading="runsLoading" @click="loadAgentRuns">🔄 刷新</a-button>
     </template>
@@ -526,28 +606,187 @@ async function runAbCompare() {
           {{ truncate(record.idea, 30) }}
         </template>
         <template v-else-if="column.key === 'total_cost_usd'">
-          {{ fmtCost(record.total_cost_usd) }}
+          <span :class="{
+            'pp-cost-cell': true,
+            'pp-cost-cell--alert': record.total_cost_usd != null && record.total_cost_usd > 1,
+          }">{{ fmtCost(record.total_cost_usd) }}</span>
         </template>
         <template v-else-if="column.key === 'fallback_used'">
-          <span :style="{ color: record.fallback_used ? '#cf1322' : '#16a34a' }">
+          <span :class="record.fallback_used ? 'pp-fb-cell pp-fb-cell--ok' : 'pp-fb-cell pp-fb-cell--err'">
             {{ record.fallback_used ? '✓' : '✗' }}
           </span>
         </template>
         <template v-else-if="column.key === 'is_mock'">
-          <a-tag v-if="record.is_mock" color="default">M</a-tag>
-          <a-tag v-else color="blue">真</a-tag>
+          <span v-if="record.is_mock" class="pp-mock-cell pp-mock-cell--mock">M</span>
+          <span v-else class="pp-mock-cell pp-mock-cell--real">真</span>
         </template>
         <template v-else-if="column.key === 'endpoint'">
-          <a-tag color="purple">{{ record.endpoint }}</a-tag>
+          <span class="pp-tag" :style="{ background: 'var(--pp-color-primary-soft)', color: 'var(--pp-color-primary-active)' }">
+            {{ record.endpoint }}
+          </span>
         </template>
       </template>
       <template #expandedRowRender="{ record }">
-        <div style="background:#fafafa;padding:8px">
+        <div class="pp-run-detail">
           <div style="margin-bottom:6px"><b>idea：</b>{{ record.idea || '-' }}</div>
-          <div v-if="record.error" style="color:#cf1322"><b>error：</b>{{ record.error }}</div>
-          <div v-else style="color:#999">无 error</div>
+          <div v-if="record.error" class="pp-run-detail__error"><b>error：</b>{{ record.error }}</div>
+          <div v-else style="color:var(--pp-color-text-tertiary)">无 error</div>
         </div>
       </template>
     </a-table>
   </a-card>
+  </div>
 </template>
+
+<style scoped>
+.pp-admin-dashboard {
+  padding: var(--pp-space-5);
+  display: flex;
+  flex-direction: column;
+  gap: var(--pp-space-4);
+  background: var(--pp-color-bg);
+  min-height: 100%;
+}
+
+/* 顶部欢迎卡片 */
+.pp-admin-header {
+  padding: var(--pp-space-4) var(--pp-space-5);
+  background: var(--pp-color-surface);
+  border-radius: var(--pp-radius-lg);
+  box-shadow: var(--pp-shadow-sm);
+  border: 1px solid var(--pp-color-border-soft);
+}
+.pp-admin-header :deep(.ant-page-header-heading-title) {
+  color: var(--pp-color-text);
+  font-weight: var(--pp-font-weight-semibold);
+}
+
+/* 通用 pp-card 局部样式 (覆盖以保证 hover 等效果生效) */
+.pp-admin-dashboard :deep(.pp-card),
+.pp-admin-dashboard .pp-card {
+  background: var(--pp-color-surface);
+  border-radius: var(--pp-radius-lg);
+  box-shadow: var(--pp-shadow-sm);
+  border: 1px solid var(--pp-color-border-soft);
+  padding: var(--pp-space-5);
+}
+.pp-admin-dashboard :deep(.pp-card-hover),
+.pp-admin-dashboard .pp-card-hover {
+  transition: transform var(--pp-transition), box-shadow var(--pp-transition);
+}
+.pp-admin-dashboard :deep(.pp-card-hover:hover),
+.pp-admin-dashboard .pp-card-hover:hover {
+  transform: translateY(-1px);
+  box-shadow: var(--pp-shadow-md);
+}
+
+/* 图表卡片 */
+.pp-chart-card {
+  padding: var(--pp-space-4) var(--pp-space-5);
+}
+
+/* stats 4 卡 */
+.pp-stat-card {
+  display: flex;
+  flex-direction: column;
+  gap: var(--pp-space-2);
+}
+.pp-stat-card__label {
+  font-size: var(--pp-font-size-sm);
+  color: var(--pp-color-text-secondary);
+  font-weight: var(--pp-font-weight-medium);
+}
+.pp-stat-card__value {
+  font-size: 28px;
+  font-weight: var(--pp-font-weight-semibold);
+  color: var(--pp-color-primary);
+  letter-spacing: -0.02em;
+  line-height: var(--pp-line-height-tight);
+}
+.pp-stat-card__suffix {
+  font-size: var(--pp-font-size-base);
+  color: var(--pp-color-text-secondary);
+  font-weight: var(--pp-font-weight-regular);
+  margin-left: var(--pp-space-1);
+}
+
+/* section 卡片（A/B 对比 / agent_runs 等沿用 a-card） */
+.pp-section-card {
+  border-radius: var(--pp-radius-lg) !important;
+  box-shadow: var(--pp-shadow-sm) !important;
+  border: 1px solid var(--pp-color-border-soft) !important;
+}
+.pp-section-card :deep(.ant-card-head) {
+  border-bottom: 1px solid var(--pp-color-border-soft);
+}
+.pp-section-card :deep(.ant-card-head-title) {
+  font-weight: var(--pp-font-weight-semibold);
+  color: var(--pp-color-text);
+}
+
+/* agent_runs 表格视觉 */
+.pp-runs-card :deep(.ant-table-thead > tr > th) {
+  background: var(--pp-color-bg) !important;
+  font-weight: 600;
+  color: var(--pp-color-text);
+  border-bottom: 1px solid var(--pp-color-border) !important;
+}
+.pp-runs-card :deep(.ant-table-tbody > tr > td) {
+  border-bottom: 1px solid var(--pp-color-border-soft);
+}
+.pp-runs-card :deep(.ant-table-tbody > tr:hover > td),
+.pp-runs-card :deep(.ant-table-tbody > tr.ant-table-row-hover > td) {
+  background: var(--pp-color-primary-soft) !important;
+}
+.pp-runs-card :deep(.ant-table) {
+  border-radius: var(--pp-radius-md);
+}
+
+/* cost 列告警 */
+.pp-cost-cell { color: var(--pp-color-text); }
+.pp-cost-cell--alert {
+  color: var(--pp-color-danger);
+  font-weight: var(--pp-font-weight-semibold);
+}
+
+/* fallback 列 ✓ / ✗ */
+.pp-fb-cell {
+  font-weight: var(--pp-font-weight-semibold);
+  font-size: var(--pp-font-size-base);
+}
+.pp-fb-cell--ok { color: var(--pp-color-success); }
+.pp-fb-cell--err { color: var(--pp-color-danger); }
+
+/* mock 列 M=灰 italic / 真=primary */
+.pp-mock-cell {
+  display: inline-block;
+  padding: 2px var(--pp-space-2);
+  border-radius: var(--pp-radius-sm);
+  font-size: var(--pp-font-size-xs);
+  font-weight: var(--pp-font-weight-medium);
+  line-height: 1.5;
+}
+.pp-mock-cell--mock {
+  background: var(--pp-color-bg-elevated);
+  color: var(--pp-color-text-secondary);
+  font-style: italic;
+}
+.pp-mock-cell--real {
+  background: var(--pp-color-primary-soft);
+  color: var(--pp-color-primary);
+}
+
+/* expanded row detail */
+.pp-run-detail {
+  background: var(--pp-color-primary-soft);
+  padding: var(--pp-space-3) var(--pp-space-4);
+  border-radius: var(--pp-radius-md);
+  font-family: var(--pp-font-mono);
+  font-size: var(--pp-font-size-sm);
+  color: var(--pp-color-text);
+}
+.pp-run-detail__error {
+  color: var(--pp-color-danger);
+  word-break: break-word;
+}
+</style>

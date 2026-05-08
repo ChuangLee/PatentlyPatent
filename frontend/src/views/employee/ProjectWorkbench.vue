@@ -162,69 +162,72 @@ function onRoundComplete() {
 <template>
   <ReadonlyBanner :show="isReadonly" />
 
-  <a-page-header
-    :title="project?.title ?? '加载中...'"
-    sub-title="工作台 · 文件 + AI 对话 + 预览"
-  >
-    <template #extra>
-      <!-- v0.21 任务 1: 一键全程挖掘（仅 agent_sdk 模式可见） -->
-      <a-button
-        v-if="!isReadonly && project && ui.agentMode === 'agent_sdk'"
-        type="primary"
-        danger
-        :loading="fullMining"
-        :disabled="chat.streaming && !fullMining"
-        @click="runFullMining"
-      >
-        ⚡ 一键全程挖掘
-      </a-button>
-      <a-button
-        v-if="project"
-        :type="ui.workbenchSplitView ? 'primary' : 'default'"
-        :ghost="ui.workbenchSplitView"
-        :class="{ 'pp-split-btn-active': chat.streaming }"
-        @click="ui.toggleWorkbenchSplitView"
-      >
-        📑 {{ ui.workbenchSplitView ? '关闭 split view' : '切 split view' }}
-      </a-button>
-      <a-button
-        v-if="!isReadonly && project"
-        type="primary"
-        :loading="generating"
-        @click="generateDisclosureDocx"
-      >
-        🎯 生成交底书 .docx
-      </a-button>
-    </template>
-    <template #footer>
-      <a-steps
-        v-if="project"
-        :current="currentStep"
-        size="small"
-        style="margin-top:8px"
-      >
-        <a-step title="报门（提交创意）" />
-        <a-step title="挖掘" />
-        <a-step title="检索" />
-        <a-step title="撰写" />
-        <a-step title="完成" />
-      </a-steps>
-      <!-- v0.20 Wave1 任务 1: 5 章节并行进度（仅 agent_sdk 模式显示） -->
-      <a-steps
-        v-if="ui.agentMode === 'agent_sdk'"
-        :current="sectionCurrentIdx"
-        size="small"
-        style="margin-top:12px"
-      >
-        <a-step
-          v-for="s in SECTION_STEPS"
-          :key="s.key"
-          :title="s.title"
-          :status="stepStatus(s.key)"
-        />
-      </a-steps>
-    </template>
-  </a-page-header>
+  <div class="pp-workbench-header pp-card">
+    <a-page-header
+      :title="project?.title ?? '加载中...'"
+      sub-title="工作台 · 文件 + AI 对话 + 预览"
+      class="pp-workbench-page-header"
+    >
+      <template #extra>
+        <!-- v0.21 任务 1: 一键全程挖掘（仅 agent_sdk 模式可见） -->
+        <a-button
+          v-if="!isReadonly && project && ui.agentMode === 'agent_sdk'"
+          type="primary"
+          :loading="fullMining"
+          :disabled="chat.streaming && !fullMining"
+          class="pp-btn-onekey"
+          @click="runFullMining"
+        >
+          ⚡ 一键全程挖掘
+        </a-button>
+        <a-button
+          v-if="project"
+          :type="ui.workbenchSplitView ? 'primary' : 'default'"
+          :ghost="ui.workbenchSplitView"
+          :class="{ 'pp-split-btn-active': chat.streaming }"
+          @click="ui.toggleWorkbenchSplitView"
+        >
+          📑 {{ ui.workbenchSplitView ? '关闭 split view' : '切 split view' }}
+        </a-button>
+        <a-button
+          v-if="!isReadonly && project"
+          type="primary"
+          :loading="generating"
+          @click="generateDisclosureDocx"
+        >
+          🎯 生成交底书 .docx
+        </a-button>
+      </template>
+      <template #footer>
+        <a-steps
+          v-if="project"
+          :current="currentStep"
+          size="small"
+          class="pp-workbench-steps"
+        >
+          <a-step title="报门（提交创意）" />
+          <a-step title="挖掘" />
+          <a-step title="检索" />
+          <a-step title="撰写" />
+          <a-step title="完成" />
+        </a-steps>
+        <!-- v0.20 Wave1 任务 1: 5 章节并行进度（仅 agent_sdk 模式显示） -->
+        <a-steps
+          v-if="ui.agentMode === 'agent_sdk'"
+          :current="sectionCurrentIdx"
+          size="small"
+          class="pp-workbench-steps pp-workbench-steps-sections"
+        >
+          <a-step
+            v-for="s in SECTION_STEPS"
+            :key="s.key"
+            :title="s.title"
+            :status="stepStatus(s.key)"
+          />
+        </a-steps>
+      </template>
+    </a-page-header>
+  </div>
 
   <div class="pp-workbench-grid">
     <!-- 左：聊天 -->
@@ -257,18 +260,137 @@ function onRoundComplete() {
 </template>
 
 <style scoped>
+.pp-workbench-header {
+  margin-bottom: var(--pp-space-4);
+}
+.pp-card {
+  background: var(--pp-color-surface);
+  border-radius: var(--pp-radius-lg);
+  box-shadow: var(--pp-shadow-sm);
+  border: 1px solid var(--pp-color-border-soft);
+  padding: var(--pp-space-5);
+}
+.pp-workbench-page-header {
+  padding: 0 !important;
+  font-family: var(--pp-font-sans);
+}
+.pp-workbench-steps {
+  margin-top: var(--pp-space-3);
+  min-height: 48px;
+}
+.pp-workbench-steps-sections {
+  margin-top: var(--pp-space-3);
+}
+
+/* ---------- 5 步 timeline 紧凑布局（48px 高） ---------- */
+.pp-workbench-steps :deep(.ant-steps-item-icon) {
+  width: 24px;
+  height: 24px;
+  line-height: 22px;
+  margin-inline-end: 8px;
+  font-size: 12px;
+  border-width: 1.5px;
+  transition: var(--pp-transition);
+}
+.pp-workbench-steps :deep(.ant-steps-item-title) {
+  font-size: var(--pp-font-size-sm);
+  line-height: 24px;
+  padding-inline-end: 12px;
+}
+.pp-workbench-steps :deep(.ant-steps-item-tail) {
+  top: 12px;
+  padding: 0 10px;
+}
+.pp-workbench-steps :deep(.ant-steps-item-tail::after) {
+  height: 2px;
+  border-radius: 1px;
+  background: var(--pp-color-border);
+}
+
+/* ---------- finish (done): primary 实心 + ✓ ---------- */
+.pp-workbench-steps :deep(.ant-steps-item-finish .ant-steps-item-icon) {
+  background: var(--pp-color-primary);
+  border-color: var(--pp-color-primary);
+}
+.pp-workbench-steps :deep(.ant-steps-item-finish .ant-steps-item-icon > .ant-steps-icon) {
+  color: var(--pp-color-text-inverse);
+}
+.pp-workbench-steps :deep(.ant-steps-item-finish > .ant-steps-item-container > .ant-steps-item-content > .ant-steps-item-title) {
+  color: var(--pp-color-text);
+  font-weight: var(--pp-font-weight-medium);
+}
+/* finish 段连接线：primary 渐变实色 */
+.pp-workbench-steps :deep(.ant-steps-item-finish > .ant-steps-item-container > .ant-steps-item-tail::after) {
+  background: linear-gradient(90deg, var(--pp-color-primary), var(--pp-color-primary-hover));
+}
+
+/* ---------- process (running): primary 实心 + 呼吸 halo ---------- */
+.pp-workbench-steps :deep(.ant-steps-item-process .ant-steps-item-icon) {
+  background: var(--pp-color-primary);
+  border-color: var(--pp-color-primary);
+  animation: pp-step-halo 1.6s ease-in-out infinite;
+}
+.pp-workbench-steps :deep(.ant-steps-item-process .ant-steps-item-icon > .ant-steps-icon) {
+  color: var(--pp-color-text-inverse);
+}
+.pp-workbench-steps :deep(.ant-steps-item-process > .ant-steps-item-container > .ant-steps-item-content > .ant-steps-item-title) {
+  color: var(--pp-color-primary);
+  font-weight: var(--pp-font-weight-semibold);
+}
+@keyframes pp-step-halo {
+  0%, 100% { box-shadow: 0 0 0 3px rgba(91, 108, 255, 0.18); }
+  50%      { box-shadow: 0 0 0 6px rgba(91, 108, 255, 0.32); }
+}
+
+/* ---------- wait (pending): 空心 + border-soft ---------- */
+.pp-workbench-steps :deep(.ant-steps-item-wait .ant-steps-item-icon) {
+  background: var(--pp-color-surface);
+  border-color: var(--pp-color-border-strong);
+}
+.pp-workbench-steps :deep(.ant-steps-item-wait .ant-steps-item-icon > .ant-steps-icon) {
+  color: var(--pp-color-text-tertiary);
+}
+.pp-workbench-steps :deep(.ant-steps-item-wait > .ant-steps-item-container > .ant-steps-item-content > .ant-steps-item-title) {
+  color: var(--pp-color-text-tertiary);
+}
+
+/* error */
+.pp-workbench-steps :deep(.ant-steps-item-error .ant-steps-item-icon) {
+  background: var(--pp-color-danger-soft);
+  border-color: var(--pp-color-danger);
+}
+.pp-workbench-steps :deep(.ant-steps-item-error .ant-steps-item-icon > .ant-steps-icon) {
+  color: var(--pp-color-danger);
+}
+
+/* 一键全程按钮 */
+.pp-btn-onekey {
+  border-radius: var(--pp-radius-md) !important;
+  background: var(--pp-color-primary) !important;
+  border-color: var(--pp-color-primary) !important;
+  font-weight: var(--pp-font-weight-medium);
+  transition: var(--pp-transition);
+}
+.pp-btn-onekey:hover {
+  background: var(--pp-color-primary-hover) !important;
+  border-color: var(--pp-color-primary-hover) !important;
+  box-shadow: var(--pp-shadow-md);
+  transform: translateY(-1px);
+}
+
 .pp-workbench-grid {
   display: grid;
   grid-template-columns: 1fr 480px;
-  gap: 12px;
-  height: calc(100vh - 260px);
+  gap: var(--pp-space-4);
+  height: calc(100vh - 280px);
   min-height: 480px;
-  margin-top: 12px;
+  margin-top: var(--pp-space-4);
 }
 .pp-pane {
-  border: 1px solid #eee;
-  border-radius: 8px;
-  background: #fff;
+  border: 1px solid var(--pp-color-border-soft);
+  border-radius: var(--pp-radius-lg);
+  background: var(--pp-color-surface);
+  box-shadow: var(--pp-shadow-sm);
   overflow: hidden;
   display: flex;
   flex-direction: column;
@@ -281,7 +403,7 @@ function onRoundComplete() {
   gap: 0;
 }
 .pp-pane-split-top {
-  border-bottom: 1px solid #eee;
+  border-bottom: 1px solid var(--pp-color-border-soft);
   min-height: 0;
   overflow: hidden;
   display: flex;
@@ -294,12 +416,12 @@ function onRoundComplete() {
   flex-direction: column;
 }
 .pp-split-btn-active {
-  box-shadow: 0 0 0 2px rgba(22, 119, 255, 0.25);
+  box-shadow: var(--pp-shadow-focus);
   animation: pp-split-glow 1.6s ease-in-out infinite;
 }
 @keyframes pp-split-glow {
-  0%, 100% { box-shadow: 0 0 0 2px rgba(22, 119, 255, 0.25); }
-  50% { box-shadow: 0 0 0 4px rgba(22, 119, 255, 0.45); }
+  0%, 100% { box-shadow: 0 0 0 2px rgba(91, 108, 255, 0.25); }
+  50%      { box-shadow: 0 0 0 4px rgba(91, 108, 255, 0.45); }
 }
 
 @media (max-width: 1280px) {

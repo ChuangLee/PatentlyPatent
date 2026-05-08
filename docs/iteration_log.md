@@ -555,3 +555,44 @@ title: PatentlyPatent 迭代日志
 - admin Dashboard 视觉对齐（agent_runs 表 + 图表样式）
 - chat 气泡 / tool 卡片重设计
 - 真 CAS server 联调（用户提供企业 CAS URL 或选 Apereo demo 实测一次）
+
+
+## v0.24 · 2026-05-08 16:00 · 12 件并行 — 视觉对齐 token 全站统一
+
+**A 工作台主体（subagent）— 3 件**
+- A1. ProjectWorkbench: a-page-header 包 pp-card；split-glow 阴影从蓝换品牌色；按钮去 danger 用 pp-btn-onekey primary；grid gap → --pp-space-4
+- A2. FileTree: 拖拽 hover 从 #fff7e6/orange → primary-soft/primary；选中节点 primary-soft + 3px primary 竖线；spawn-flash 改品牌色
+- A3. FilePreviewer: 容器白底 radius-lg shadow-sm；header 48px；markdown h1-3/code/blockquote 用 token；empty state 居中
+
+**B chat / tool / timeline / modal（subagent）— 4 件**
+- B1. user 气泡：右对齐 + 紫蓝渐变 + 白字 + radius-lg + 右下三角；agent 气泡：左对齐 + 白底 + 28px 渐变 avatar「AI」；时间戳 11px 灰
+- B2. tool 卡片：indigo-pink 渐变底 + 3 状态徽章（running spin / 完成 ✓ / 失败 ✗）；入参白底 monospace / 结果浅绿 monospace
+- B3. 5 步 timeline：done = primary 实心 + ✓；running = halo 呼吸；pending = 灰边空心；连接线渐变
+- B4. NewProjectModal: 24px 顶部紫蓝粉渐变条；上传 hero primary-soft + dashed；阶段卡片选中 primary-soft + primary 边
+
+**C admin Dashboard + echarts（subagent）— 3 件**
+- C1. admin Dashboard: 顶部 + 4 stats 卡用 pp-card pp-card-hover；hover translateY(-1px) + shadow-md；数字 28px primary
+- C2. agent_runs 表格: 表头浅底 600；hover primary-soft；cost > $1 红字；fallback ✓ success / ✗ danger；mock 灰 italic / 真 primary-soft
+- C3. echarts 6 色 palette: PP_PALETTE = [indigo/violet/pink/emerald/amber/blue]，PP_ECHARTS_THEME 注入 4 个 init；fallback bar ok/warning/danger 三色
+
+**D 错误页 + 暗色模式 + 面包屑（subagent）— 3 件**
+- D1. NotFound 404 + Forbidden 403：96px 渐变文字（indigo→violet→pink）+ 副标题 + 返回按钮
+- D2. 暗色模式实装：tokens.css 加 :root[data-theme="dark"] 块覆盖 17 个 token；App.vue watch ui.theme → document.documentElement.setAttribute；antd ConfigProvider darkAlgorithm；DefaultLayout Header 加 🌙/☀️ 切换按钮
+- D3. Header 面包屑：route meta path → 首页 / 项目 / [标题] 用 › 分隔；末段 disabled
+
+**测试**
+- pnpm test 44/44 / pnpm build 通
+- 公网部署 200，pytest test_auth_cas 6/6 仍 OK
+
+**修改/新增文件**
+- 13 文件：ProjectWorkbench, FileTree, FilePreviewer, AgentChatStream, NewProjectModal, admin Dashboard, NotFound, Forbidden, App.vue, DefaultLayout, tokens.css
+
+**v0.24 共完成 13 件视觉对齐需求**
+
+**下轮目标 (v0.25+)**
+- 真 CAS server 联调（用户提供企业 URL 或 Apereo demo）
+- 暗色模式真浏览器 e2e
+- 移动端响应式真测（375px / 768px / 1024px）
+- micro-interaction：节点拖拽过渡 / 气泡入场动画 / 数字 count-up
+- 性能：首屏 vue chunk preload + 路由级 lazy 优化
+- a11y：键盘导航 + ARIA 标签 + 对比度审查

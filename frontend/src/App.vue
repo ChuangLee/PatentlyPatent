@@ -1,5 +1,21 @@
 <script setup lang="ts">
+import { computed, watch, onMounted } from 'vue';
 import { theme as antdTheme } from 'ant-design-vue';
+import { useUIStore } from '@/stores/ui';
+
+const ui = useUIStore();
+
+/**
+ * 暗色模式同步：在 <html> 设置 data-theme，让 tokens.css 的
+ * :root[data-theme='dark'] 覆盖块生效。
+ */
+function applyTheme(t: 'light' | 'dark') {
+  if (typeof document === 'undefined') return;
+  document.documentElement.setAttribute('data-theme', t);
+}
+
+onMounted(() => applyTheme(ui.theme));
+watch(() => ui.theme, (t) => applyTheme(t));
 
 /**
  * 全局 antd 主题：把 design token 注入到 antd 组件，
@@ -8,19 +24,20 @@ import { theme as antdTheme } from 'ant-design-vue';
  * token 字段命名遵循 ant-design-vue 4.x 主题 API
  * https://www.antdv.com/docs/vue/customize-theme
  */
-const themeConfig = {
-  algorithm: antdTheme.defaultAlgorithm,
+const themeConfig = computed(() => ({
+  algorithm:
+    ui.theme === 'dark' ? antdTheme.darkAlgorithm : antdTheme.defaultAlgorithm,
   token: {
     colorPrimary: '#5B6CFF',
     colorSuccess: '#10B981',
     colorWarning: '#F59E0B',
     colorError: '#EF4444',
     colorInfo: '#3B82F6',
-    colorTextBase: '#111827',
-    colorBgBase: '#FFFFFF',
-    colorBgLayout: '#FAFBFC',
-    colorBorder: '#E5E7EB',
-    colorBorderSecondary: '#F3F4F6',
+    colorTextBase: ui.theme === 'dark' ? '#F1F5F9' : '#111827',
+    colorBgBase: ui.theme === 'dark' ? '#1E293B' : '#FFFFFF',
+    colorBgLayout: ui.theme === 'dark' ? '#0F172A' : '#FAFBFC',
+    colorBorder: ui.theme === 'dark' ? '#334155' : '#E5E7EB',
+    colorBorderSecondary: ui.theme === 'dark' ? '#1E293B' : '#F3F4F6',
     borderRadius: 10,
     borderRadiusLG: 14,
     borderRadiusSM: 6,
@@ -51,11 +68,11 @@ const themeConfig = {
     },
     Menu: {
       itemBorderRadius: 8,
-      itemSelectedBg: '#EEF0FF',
+      itemSelectedBg: ui.theme === 'dark' ? '#312E81' : '#EEF0FF',
       itemSelectedColor: '#5B6CFF',
     },
   },
-};
+}));
 </script>
 <template>
   <a-config-provider :theme="themeConfig">
