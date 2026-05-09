@@ -50,6 +50,7 @@ const attachmentCount = computed(() => attachments.value.length);
 const uploadIndex = ref(0);
 const uploadTotal = ref(0);
 const uploadCurrentName = ref('');
+const recentlyAddedFlash = ref(0);  // v0.31: 每次新文件入队 +1 触发列表入场动画
 const uploading = computed(() => uploadTotal.value > 0 && uploadIndex.value < uploadTotal.value);
 const uploadPercent = computed(() =>
   uploadTotal.value > 0 ? Math.round((uploadIndex.value / uploadTotal.value) * 100) : 0,
@@ -61,8 +62,29 @@ function isTextLike(name: string, mime: string): boolean {
   const lower = name.toLowerCase();
   if (lower.endsWith('.md') || lower.endsWith('.txt') || lower.endsWith('.json')) return true;
   if (lower.endsWith('.py') || lower.endsWith('.js') || lower.endsWith('.ts')) return true;
+  if (lower.endsWith('.csv') || lower.endsWith('.yml') || lower.endsWith('.yaml')) return true;
   if (mime.startsWith('text/') || mime === 'application/json') return true;
   return false;
+}
+
+function isZipLike(name: string, mime: string): boolean {
+  const lower = name.toLowerCase();
+  return lower.endsWith('.zip') || mime === 'application/zip' || mime === 'application/x-zip-compressed';
+}
+
+/** v0.31: 推断 mime（office / 压缩 / 图片 等） */
+function inferMimeByName(name: string, fallback: string): string {
+  const l = name.toLowerCase();
+  if (l.endsWith('.docx')) return 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
+  if (l.endsWith('.doc'))  return 'application/msword';
+  if (l.endsWith('.xlsx')) return 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
+  if (l.endsWith('.xls'))  return 'application/vnd.ms-excel';
+  if (l.endsWith('.pptx')) return 'application/vnd.openxmlformats-officedocument.presentationml.presentation';
+  if (l.endsWith('.ppt'))  return 'application/vnd.ms-powerpoint';
+  if (l.endsWith('.csv'))  return 'text/csv';
+  if (l.endsWith('.zip'))  return 'application/zip';
+  if (l.endsWith('.pdf'))  return 'application/pdf';
+  return fallback || 'application/octet-stream';
 }
 
 async function readAsText(file: File): Promise<string> {
@@ -75,30 +97,68 @@ async function readAsText(file: File): Promise<string> {
 }
 
 function onUploadChange(info: { fileList: { uid: string }[] }) {
-  // antd 串行调 beforeUpload 时，先用 fileList.length 设置 total（用户一次选多文件场景）
   if (info?.fileList?.length && uploadTotal.value === 0) {
     uploadTotal.value = info.fileList.length;
     uploadIndex.value = 0;
   }
 }
 
-async function beforeUpload(file: File): Promise<boolean> {
-  uploadCurrentName.value = file.name;
-  // 单文件场景下 fileList 没事先赋 total，用流式累加
-  if (uploadTotal.value === 0) uploadTotal.value = 1;
-  const mime = file.type || 'application/octet-stream';
+/** v0.31: 通用入队，单文件 → attachment，自动加视觉脉动 */
+async function _enqueueAttachment(file: File, sourceTag = '') {
+  const mime = inferMimeByName(file.name, file.type || '');
   let content: string | undefined;
   if (isTextLike(file.name, mime) && file.size <= 2 * 1024 * 1024) {
     try { content = await readAsText(file); } catch { /* 忽略 */ }
   }
   attachments.value.push({
-    id: genId(), type: 'file',
-    name: file.name, size: file.size, mime,
+    id: genId(),
+    type: 'file',
+    name: sourceTag ? `${sourceTag}/${file.name}` : file.name,
+    size: file.size,
+    mime,
     content,
     addedAt: new Date().toISOString(),
   });
-  uploadIndex.value += 1;
-  // 全部完成时清状态
+  recentlyAddedFlash.value += 1;
+}
+
+async function beforeUpload(file: File): Promise<boolean> {
+  uploadCurrentName.value = file.name;
+  if (uploadTotal.value === 0) uploadTotal.value = 1;
+  const mime = inferMimeByName(file.name, file.type || '');
+
+  // v0.31: 压缩包自动解压（仅 .zip；最多展开 50 个文件，单文件 ≤ 5MB）
+  if (isZipLike(file.name, mime)) {
+    try {
+      const JSZip = (await import('jszip')).default;
+      const zip = await JSZip.loadAsync(file);
+      const entries = Object.values(zip.files).filter(f => !f.dir);
+      let extracted = 0;
+      for (const entry of entries) {
+        if (extracted >= 50) break;
+        // skip junk
+        if (entry.name.startsWith('__MACOSX/') || entry.name.endsWith('/.DS_Store')) continue;
+        const blob = await entry.async('blob');
+        if (blob.size > 5 * 1024 * 1024) continue;
+        const baseName = entry.name.split('/').pop() || entry.name;
+        const innerFile = new File([blob], baseName, {
+          type: inferMimeByName(baseName, ''),
+        });
+        await _enqueueAttachment(innerFile, file.name.replace(/\.zip$/i, ''));
+        extracted += 1;
+      }
+      message.success(`📦 解压「${file.name}」 → 加入 ${extracted} 个文件`);
+    } catch (e) {
+      message.error(`解压失败：${(e as Error).message}`);
+      // 兜底：把 zip 自身入队
+      await _enqueueAttachment(file);
+    }
+    uploadIndex.value += 1;
+  } else {
+    await _enqueueAttachment(file);
+    uploadIndex.value += 1;
+  }
+
   if (uploadIndex.value >= uploadTotal.value) {
     setTimeout(() => {
       if (uploadIndex.value >= uploadTotal.value) {
@@ -119,9 +179,13 @@ function fileIcon(mime?: string): string {
   if (!mime) return '📦';
   if (mime.startsWith('image/')) return '🖼️';
   if (mime.includes('pdf')) return '📑';
-  if (mime.includes('word') || mime.includes('officedocument')) return '📝';
+  // v0.31: office
+  if (mime.includes('wordprocessingml') || mime === 'application/msword') return '📝';
+  if (mime.includes('spreadsheetml') || mime === 'application/vnd.ms-excel') return '📊';
+  if (mime.includes('presentationml') || mime === 'application/vnd.ms-powerpoint') return '📽️';
+  if (mime === 'text/csv') return '📊';
   if (mime.includes('text/markdown') || mime.includes('plain')) return '📄';
-  if (mime.includes('zip') || mime.includes('rar')) return '🗜️';
+  if (mime.includes('zip') || mime.includes('rar') || mime.includes('compressed')) return '🗜️';
   if (mime.includes('json') || mime.includes('javascript') || mime.includes('python')) return '💻';
   return '📦';
 }
@@ -197,11 +261,30 @@ function onCancel() {
            @ok="onOk" @cancel="onCancel" :mask-closable="false">
 
     <a-form layout="vertical">
-      <!-- 大文件上传区（紧凑版） -->
-      <div class="pp-upload-hero">
-        <h3 class="pp-upload-hero__title">📎 把和创意相关的文档、代码、图像扔到这里</h3>
-        <p class="pp-upload-hero__sub">PDF / Word / 代码 / 图片均可；越多越好，AI 会自动分析。</p>
-        <div class="pp-newproj-upload-wrap">
+      <!-- 大文件上传区（紧凑版 + 显式按钮 + 全局拖拽防御标记） -->
+      <div class="pp-upload-hero" data-pp-dropzone>
+        <div class="pp-upload-hero__head">
+          <div>
+            <h3 class="pp-upload-hero__title">📎 把和创意相关的资料拖到这里</h3>
+            <p class="pp-upload-hero__sub">支持 Word / Excel / PPT / PDF / 图片 / 代码 / 压缩包（自动解压）</p>
+          </div>
+          <a-upload
+            :multiple="true"
+            :before-upload="beforeUpload"
+            :show-upload-list="false"
+            :disabled="uploading"
+            @change="onUploadChange"
+            accept=".pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.csv,.md,.txt,.json,.png,.jpg,.jpeg,.gif,.svg,.webp,.py,.js,.ts,.tsx,.yml,.yaml,.zip"
+          >
+            <a-button type="primary" :disabled="uploading" class="pp-upload-pick-btn">
+              📁 选择文件
+            </a-button>
+          </a-upload>
+        </div>
+        <div
+          class="pp-newproj-upload-wrap"
+          :class="{ 'pp-newproj-upload-wrap--flash': recentlyAddedFlash > 0 }"
+        >
           <a-upload-dragger
             class="pp-upload-dragger--compact"
             name="file"
@@ -210,10 +293,10 @@ function onCancel() {
             :show-upload-list="false"
             :disabled="uploading"
             @change="onUploadChange"
-            accept=".pdf,.doc,.docx,.md,.txt,.png,.jpg,.jpeg,.svg,.json,.py,.js,.ts,.zip,.tar,.gz"
+            accept=".pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.csv,.md,.txt,.json,.png,.jpg,.jpeg,.gif,.svg,.webp,.py,.js,.ts,.tsx,.yml,.yaml,.zip"
           >
             <p class="ant-upload-drag-icon" style="font-size:24px;margin:0 0 2px">📎</p>
-            <p class="ant-upload-text" style="font-size:13px;margin:0">点击或拖拽文件到此区域（可多选）</p>
+            <p class="ant-upload-text" style="font-size:13px;margin:0">点击或拖拽文件到此区域（可多选；不识别格式不会被浏览器下载）</p>
           </a-upload-dragger>
           <!-- v0.15-D: 批传进度叠层 -->
           <div v-if="uploading" class="pp-newproj-progress-overlay">
@@ -229,14 +312,16 @@ function onCancel() {
           </div>
         </div>
 
-        <a-list v-if="attachmentCount" size="small" bordered :data-source="attachments" style="margin-top:12px">
+        <a-list v-if="attachmentCount" size="small" bordered :data-source="attachments"
+                class="pp-attach-list" style="margin-top:10px"
+                :key="recentlyAddedFlash">
           <template #renderItem="{ item }: { item: Attachment }">
-            <a-list-item>
+            <a-list-item class="pp-attach-item">
               <template #actions>
                 <a-button type="link" danger size="small" @click="removeAt(item.id)">移除</a-button>
               </template>
-              <span style="margin-right:8px">{{ fileIcon(item.mime) }}</span>
-              <span style="margin-right:8px">{{ item.name }}</span>
+              <span style="margin-right:8px;font-size:16px">{{ fileIcon(item.mime) }}</span>
+              <span style="margin-right:8px;font-weight:500">{{ item.name }}</span>
               <span style="color:#999;font-size:12px">{{ fmtSize(item.size) }}</span>
             </a-list-item>
           </template>
@@ -320,6 +405,41 @@ function onCancel() {
   margin: 0 0 8px;
   font-size: 12px;
   color: var(--pp-color-text-secondary);
+}
+/* v0.31: hero 头部 (标题 + 选择按钮) */
+.pp-upload-hero__head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--pp-space-3);
+  margin-bottom: 6px;
+}
+.pp-upload-pick-btn {
+  flex-shrink: 0;
+}
+/* v0.31: 拖入文件后的脉动反馈 */
+@keyframes pp-flash-pulse {
+  0% { box-shadow: 0 0 0 0 rgba(91, 108, 255, 0.45); }
+  100% { box-shadow: 0 0 0 12px rgba(91, 108, 255, 0); }
+}
+.pp-newproj-upload-wrap--flash :deep(.ant-upload-drag) {
+  animation: pp-flash-pulse 700ms ease-out;
+  border-color: var(--pp-color-primary) !important;
+  background: var(--pp-color-primary-soft) !important;
+}
+/* v0.31: 拖拽悬停时 dragger 边框变品牌色（antd 默认是主色，这里强化） */
+:deep(.pp-upload-dragger--compact .ant-upload-drag-hover),
+:deep(.pp-upload-dragger--compact .ant-upload-drag:hover) {
+  border-color: var(--pp-color-primary) !important;
+  background: var(--pp-color-primary-soft) !important;
+}
+/* v0.31: 附件列表入场动画 */
+@keyframes pp-attach-in {
+  from { opacity: 0; transform: translateY(-4px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+.pp-attach-list :deep(.ant-list-item) {
+  animation: pp-attach-in 200ms ease-out;
 }
 /* 拖拽区缩矮 */
 :deep(.pp-upload-dragger--compact .ant-upload-drag) {

@@ -785,6 +785,7 @@ function renderNodeTitle(node: AntdTreeNode) {
     <div
       ref="treeContainerRef"
       class="pp-tree-dropzone"
+      data-pp-dropzone
       :class="{ 'pp-tree-drop-active': nativeDropActive }"
       style="flex:1;overflow:auto;padding:6px;position:relative"
       @dragover="onNativeDragOver"

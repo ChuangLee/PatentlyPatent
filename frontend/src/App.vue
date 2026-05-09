@@ -14,7 +14,21 @@ function applyTheme(t: 'light' | 'dark') {
   document.documentElement.setAttribute('data-theme', t);
 }
 
-onMounted(() => applyTheme(ui.theme));
+onMounted(() => {
+  applyTheme(ui.theme);
+  // v0.31: 全局拖拽防御 — 禁止浏览器在非 dropzone 区域 drop 文件时变下载/打开
+  // dropzone 自身的 dragover/drop handler 仍会工作（捕获阶段 false，先到具体元素再到 window）
+  const guard = (e: DragEvent) => {
+    const target = e.target as HTMLElement | null;
+    if (target?.closest?.('[data-pp-dropzone]')) return;  // 在 dropzone 内：放行
+    e.preventDefault();
+    if (e.type === 'drop' && e.dataTransfer) {
+      // 在 dropzone 外丢文件：吃掉，不让浏览器跳走
+    }
+  };
+  window.addEventListener('dragover', guard, false);
+  window.addEventListener('drop', guard, false);
+});
 watch(() => ui.theme, (t) => applyTheme(t));
 
 /**
