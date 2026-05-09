@@ -189,19 +189,21 @@ function onCancel() {
 
 <template>
   <a-modal :open="open" @update:open="(v: boolean) => emit('update:open', v)"
-           title="新建创新报门（提交你的创意，启动专利挖掘）" width="780" :ok-text="`确定 (${attachmentCount} 项资料)`"
+           title="新建报门 · 启动专利挖掘"
+           :width="780"
+           wrap-class-name="pp-newproj-wrap"
+           :ok-text="`确定 (${attachmentCount} 项资料)`"
            :ok-button-props="{ loading: submitting }"
-           @ok="onOk" @cancel="onCancel" :mask-closable="false"
-           class="pp-newproj-modal"
-           wrap-class-name="pp-newproj-wrap">
+           @ok="onOk" @cancel="onCancel" :mask-closable="false">
 
     <a-form layout="vertical">
-      <!-- 大文件上传区 -->
+      <!-- 大文件上传区（紧凑版） -->
       <div class="pp-upload-hero">
-        <h3 style="margin:0 0 4px 0;font-size:15px">📎 你可以把和创意有关的文档、代码、图像等各种资料都扔到这里</h3>
-        <p style="color:#888;font-size:12px;margin:0 0 12px">PDF / Word / 代码 / 图片 / 设计稿都行；越多越好，AI 会自动分析。</p>
+        <h3 class="pp-upload-hero__title">📎 把和创意相关的文档、代码、图像扔到这里</h3>
+        <p class="pp-upload-hero__sub">PDF / Word / 代码 / 图片均可；越多越好，AI 会自动分析。</p>
         <div class="pp-newproj-upload-wrap">
           <a-upload-dragger
+            class="pp-upload-dragger--compact"
             name="file"
             :multiple="true"
             :before-upload="beforeUpload"
@@ -210,9 +212,8 @@ function onCancel() {
             @change="onUploadChange"
             accept=".pdf,.doc,.docx,.md,.txt,.png,.jpg,.jpeg,.svg,.json,.py,.js,.ts,.zip,.tar,.gz"
           >
-            <p class="ant-upload-drag-icon" style="font-size:36px;margin:8px 0">📎</p>
-            <p class="ant-upload-text">点击或拖拽文件到此区域</p>
-            <p class="ant-upload-hint">支持 pdf / doc / docx / md / txt / 图片 / 代码 / 压缩包，可多选</p>
+            <p class="ant-upload-drag-icon" style="font-size:24px;margin:0 0 2px">📎</p>
+            <p class="ant-upload-text" style="font-size:13px;margin:0">点击或拖拽文件到此区域（可多选）</p>
           </a-upload-dragger>
           <!-- v0.15-D: 批传进度叠层 -->
           <div v-if="uploading" class="pp-newproj-progress-overlay">
@@ -242,7 +243,7 @@ function onCancel() {
         </a-list>
       </div>
 
-      <a-divider />
+      <a-divider class="pp-divider--compact" />
 
       <a-form-item label="项目标题" required>
         <a-input v-model:value="form.title" placeholder="一句话描述你的创新点" :maxlength="60" show-count />
@@ -273,18 +274,28 @@ function onCancel() {
       </a-row>
 
       <a-form-item label="期望 AI 帮你做什么">
-        <a-radio-group v-model:value="form.goal">
-          <a-space direction="vertical" style="width:100%">
-            <a-radio v-for="g in GOALS" :key="g.value" :value="g.value">
-              <strong>{{ g.label }}</strong>
-              <span style="color:#888;font-size:12px;margin-left:8px">{{ g.desc }}</span>
-            </a-radio>
-          </a-space>
-        </a-radio-group>
+        <div class="pp-goal-grid">
+          <label
+            v-for="g in GOALS"
+            :key="g.value"
+            class="pp-goal-card"
+            :class="{ 'pp-goal-card--active': form.goal === g.value }"
+          >
+            <input
+              type="radio"
+              name="pp-goal"
+              :value="g.value"
+              v-model="form.goal"
+              class="pp-goal-card__input"
+            />
+            <span class="pp-goal-card__label">{{ g.label }}</span>
+            <span class="pp-goal-card__desc">{{ g.desc }}</span>
+          </label>
+        </div>
       </a-form-item>
 
       <a-form-item label="补充说明（可选）">
-        <a-textarea v-model:value="form.notes" :rows="3"
+        <a-textarea v-model:value="form.notes" :rows="2"
                     placeholder="比如：方案的核心区别、想规避哪家专利、特定章节细节…" />
       </a-form-item>
     </a-form>
@@ -292,13 +303,90 @@ function onCancel() {
 </template>
 
 <style scoped>
-/* 上传 hero 区：primary-soft 底 + dashed primary 边 + radius-lg */
+/* 上传 hero 区：紧凑版（v0.30：让整个 modal 一屏不滚动） */
 .pp-upload-hero {
   background: var(--pp-color-primary-soft);
   border: 1px dashed var(--pp-color-primary);
-  border-radius: var(--pp-radius-lg);
-  padding: var(--pp-space-4);
+  border-radius: var(--pp-radius-md);
+  padding: 10px 12px;
 }
+.pp-upload-hero__title {
+  margin: 0 0 2px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--pp-color-text);
+}
+.pp-upload-hero__sub {
+  margin: 0 0 8px;
+  font-size: 12px;
+  color: var(--pp-color-text-secondary);
+}
+/* 拖拽区缩矮 */
+:deep(.pp-upload-dragger--compact .ant-upload-drag) {
+  padding: 12px 8px !important;
+  border-radius: var(--pp-radius-sm) !important;
+}
+:deep(.pp-upload-dragger--compact .ant-upload-btn) {
+  padding: 0 !important;
+}
+/* divider 更紧 */
+:deep(.pp-divider--compact) {
+  margin: 8px 0 !important;
+}
+/* v0.30：横排 goal 卡片 — 替代原 a-radio 三行布局 */
+.pp-goal-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 8px;
+}
+.pp-goal-card {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 8px 10px;
+  border: 1.5px solid var(--pp-color-border);
+  border-radius: var(--pp-radius-md);
+  cursor: pointer;
+  background: var(--pp-color-surface);
+  transition: all 0.15s ease;
+  min-height: 56px;
+}
+.pp-goal-card:hover {
+  border-color: var(--pp-color-primary);
+  background: var(--pp-color-primary-soft);
+}
+.pp-goal-card--active {
+  border-color: var(--pp-color-primary);
+  background: var(--pp-color-primary-soft);
+  box-shadow: 0 0 0 3px rgba(91, 108, 255, 0.12);
+}
+.pp-goal-card__input {
+  position: absolute;
+  opacity: 0;
+  pointer-events: none;
+}
+.pp-goal-card__label {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--pp-color-text);
+  line-height: 1.2;
+}
+.pp-goal-card--active .pp-goal-card__label {
+  color: var(--pp-color-primary);
+}
+.pp-goal-card__desc {
+  font-size: 11.5px;
+  color: var(--pp-color-text-secondary);
+  line-height: 1.35;
+}
+@media (max-width: 640px) {
+  .pp-goal-grid { grid-template-columns: 1fr; }
+}
+/* form-item 间距收紧 */
+:deep(.ant-form-item) { margin-bottom: 12px !important; }
+:deep(.ant-form-item-label) { padding-bottom: 2px !important; }
+:deep(.ant-form-item-label > label) { height: 22px !important; font-size: 13px !important; }
 .pp-newproj-upload-wrap {
   position: relative;
 }
@@ -394,21 +482,23 @@ function onCancel() {
   color: #fff;
 }
 .pp-newproj-wrap .ant-modal-header {
-  padding: calc(24px + var(--pp-space-4)) var(--pp-space-5) var(--pp-space-3);
+  padding: 30px 20px 8px;       /* 24px 渐变条 + 6px 喘息 */
   margin-bottom: 0;
   border-bottom: 1px solid var(--pp-color-border-soft);
   border-radius: 0;
 }
 .pp-newproj-wrap .ant-modal-title {
-  font-size: var(--pp-font-size-lg);
-  font-weight: var(--pp-font-weight-semibold);
+  font-size: 15px;
+  font-weight: 600;
   color: var(--pp-color-text);
 }
 .pp-newproj-wrap .ant-modal-body {
-  padding: var(--pp-space-5);
+  padding: 14px 20px;
+  max-height: calc(92vh - 88px);  /* 防溢出但尽量一屏；超时滚动 */
+  overflow-y: auto;
 }
 .pp-newproj-wrap .ant-modal-footer {
-  padding: var(--pp-space-3) var(--pp-space-5);
+  padding: 10px 20px;
   border-top: 1px solid var(--pp-color-border-soft);
 }
 
