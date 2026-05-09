@@ -22,8 +22,9 @@ export async function consumeSSE(
       if (done) break;
       buffer += decoder.decode(value, { stream: true });
 
-      // SSE event 以 \n\n 分隔
-      const events = buffer.split('\n\n');
+      // v0.35 fix: SSE 标准 spec 用 \r\n\r\n 或 \n\n 分隔事件（sse-starlette 用 CRLF）
+      // 之前只 split('\n\n') 导致 CRLF 时 buffer 永远累积，0 个 event 被解析
+      const events = buffer.split(/\r?\n\r?\n/);
       buffer = events.pop() ?? '';
       for (const block of events) {
         const ev = parseSSEBlock(block);
@@ -38,7 +39,8 @@ export async function consumeSSE(
 }
 
 function parseSSEBlock(block: string): ChatStreamEvent | null {
-  const lines = block.split('\n').map(l => l.trim()).filter(Boolean);
+  // v0.35 fix: 支持 CRLF 行内分隔
+  const lines = block.split(/\r?\n/).map(l => l.trim()).filter(Boolean);
   let type = '';
   let data = '';
   for (const line of lines) {
