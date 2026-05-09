@@ -14,6 +14,8 @@ import AgentChatStream from '@/components/chat/AgentChatStream.vue';
 import FilePreviewer from '@/components/workbench/FilePreviewer.vue';
 import ReadonlyBanner from '@/components/common/ReadonlyBanner.vue';
 import { disclosureApi } from '@/api/disclosure';
+import { filesApi } from '@/api/files';
+import { takePendingUploads } from '@/stores/uploadQueue';
 import message from 'ant-design-vue/es/message';
 import { useUIStore } from '@/stores/ui';
 import type { Project, ProjectStatus, FileNode } from '@/types';
@@ -115,6 +117,30 @@ const sectionCurrentIdx = computed(() => {
   return done;
 });
 
+/**
+ * v0.35.4: 报门时入队的二进制 attachment，进工作台后异步串行上传，
+ * 进度作为 system 风格消息推到 chat（不阻塞 onMounted）。
+ */
+async function uploadPendingAttachments(pid: string) {
+  const pending = takePendingUploads(pid);
+  if (pending.length === 0) return;
+  const rootUserId = `root-user-${pid}`;
+  chat.appendThinking(`📤 正在上传 ${pending.length} 个附件到「我的资料」...`);
+  let okCount = 0;
+  for (let i = 0; i < pending.length; i++) {
+    const f = pending[i];
+    try {
+      const node = await filesApi.upload(pid, f, rootUserId, 'user');
+      if (!files.tree.some((n: FileNode) => n.id === node.id)) files.pushNode(node);
+      okCount += 1;
+      chat.appendThinking(`  ✓ [${i + 1}/${pending.length}] ${f.name} (${(f.size / 1024).toFixed(0)} KB)`);
+    } catch (e: any) {
+      chat.appendError(`  ✗ [${i + 1}/${pending.length}] ${f.name}：${e?.message || e}`);
+    }
+  }
+  chat.appendThinking(`📤 附件上传完成（成功 ${okCount}/${pending.length}）`);
+}
+
 onMounted(async () => {
   const id = route.params.id as string;
   // 先尝试从 sessionStorage 恢复历史对话；命中则跳过后端预填
@@ -125,6 +151,9 @@ onMounted(async () => {
 
   // 装文件树（store 内部会优先用 sessionStorage 缓存，否则用传入 initialTree，否则建默认树）
   files.attach(id, project.value?.fileTree);
+
+  // v0.35.4: 报门时入队的二进制 attachment 在此异步上传 + 进度推到 chat
+  void uploadPendingAttachments(id);
 
   if (!restored && project.value?.miningSummary?.conversation.length) {
     // 首次进入：用后端 miningSummary 预填，attach 内部会 persist

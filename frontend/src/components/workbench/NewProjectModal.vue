@@ -238,7 +238,7 @@ async function onOk() {
       : (DOMAINS.find(d => d.value === form.domain)?.label ?? form.domain);
     const description = form.notes.trim()
       || `领域=${domainShown}, 阶段=${form.stage}, 期望=${form.goal}（员工未填补充说明）`;
-    // 仅文本类 attachment 走 JSON content；二进制不传（待会 multipart 上传）
+    // 仅文本类 attachment 走 JSON content；二进制不传（异步 multipart 上传）
     const textAttachments = attachments.value.filter(a => !pendingBinaries.has(a.id));
     const p = await projectsApi.create({
       title: form.title.trim(),
@@ -249,21 +249,10 @@ async function onOk() {
       attachments: textAttachments.length ? textAttachments : undefined,
     });
 
-    // v0.35.3: 二进制 attachment 走 multipart 上传到「我的资料/」（root-user-{pid}）
+    // v0.35.4: 二进制 attachment 入队 → 立即跳转工作台 → 工作台异步上传 + chat 显示进度
     if (pendingBinaries.size > 0) {
-      const { filesApi } = await import('@/api/files');
-      const rootUserId = `root-user-${p.id}`;
-      let okCount = 0;
-      for (const [attId, file] of pendingBinaries) {
-        try {
-          await filesApi.upload(p.id, file, rootUserId, 'user');
-          okCount += 1;
-        } catch (e) {
-          console.error('[NewProject upload]', file.name, e);
-        }
-        void attId;
-      }
-      if (okCount > 0) message.success(`已上传 ${okCount} 个文件到「我的资料」`);
+      const { enqueueUploads } = await import('@/stores/uploadQueue');
+      enqueueUploads(p.id, [...pendingBinaries.values()]);
     }
 
     message.success('已创建，进入项目工作台');
