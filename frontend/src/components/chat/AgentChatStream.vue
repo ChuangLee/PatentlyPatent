@@ -212,6 +212,11 @@ async function send() {
 
 /** 由父组件（ProjectWorkbench）调，进入工作台时自动跑挖掘流程 */
 async function autoMine(ctx: Parameters<typeof chatApi.autoMine>[1]) {
+  // v0.34.4: 进 autoMine 时如果上一轮 streaming 卡 true（无活动 SSE），强制重置
+  if (chat.streaming && !currentAbort) {
+    console.warn('[autoMine] streaming stuck without active abort, reset');
+    chat.endAgent();
+  }
   if (chat.streaming) return;
   const useAgentSdk = ui.agentMode === 'agent_sdk';
   if (useAgentSdk) {
@@ -238,6 +243,10 @@ async function autoMine(ctx: Parameters<typeof chatApi.autoMine>[1]) {
 
 /** v0.21 任务 1: 一键全程挖掘 — agent_sdk 模式专用，由父组件按钮触发 */
 async function mineFull(idea: string) {
+  if (chat.streaming && !currentAbort) {
+    console.warn('[mineFull] streaming stuck, reset');
+    chat.endAgent();
+  }
   if (chat.streaming) return;
   try {
     await startDetachedRun('mine_full', idea || '（无描述）', props.projectId);

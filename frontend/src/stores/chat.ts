@@ -145,11 +145,22 @@ export const useChatStore = defineStore('chat', () => {
     for (let i = messages.value.length - 1; i >= 0; i--) {
       const m = messages.value[i];
       if (m.role === 'agent' && (m.type ?? 'text') === 'text') {
-        m.content += chunk;
+        // v0.34.4 fix: 用 splice 替换整个对象，确保 Vue reactive 一定 trigger 模板更新
+        // 之前 in-place `m.content += chunk` 在某些 minified prod build 下 reactive 不稳
+        messages.value.splice(i, 1, { ...m, content: m.content + chunk });
         return;
       }
       // 若中间夹了 tool_call/thinking 卡片就继续往上找最近的 text agent
     }
+    // v0.34.4 fix: 如果找不到 text agent（例如 SSE 抢先于 startAgent 到达），
+    // 自动 push 一条新 bubble 兜底，避免 delta 完全丢失
+    messages.value.push({
+      id: `m-${Date.now()}-d-${Math.random().toString(36).slice(2, 6)}`,
+      role: 'agent',
+      content: chunk,
+      ts: new Date().toISOString(),
+      type: 'text',
+    });
   }
 
   /** v0.18-C: 推一条结构化 tool_call 消息（v0.20: 记 t0 用于耗时计算） */
