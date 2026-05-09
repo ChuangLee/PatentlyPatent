@@ -358,27 +358,30 @@ async function onNativeDrop(e: DragEvent) {
   let okCount = 0;
   const pid = props.projectId;
 
-  // 顺序上传：FileReader + 后端调用串行，避免一次性把大文件全读进内存
+  // 顺序上传：文本类走 JSON content；二进制走 multipart 落盘到后端
   for (let i = 0; i < fileArr.length; i++) {
     const f = fileArr[i];
     uploadCurrentName.value = f.name;
     try {
       const mime = inferMimeFromName(f.name);
-      let content: string | undefined;
       if (isTextLikeMime(mime)) {
-        try { content = await readAsText(f); } catch { /* 二进制兜底：忽略 */ }
+        let content: string | undefined;
+        try { content = await readAsText(f); } catch { /* ignore */ }
+        const node = await filesApi.create(pid, {
+          name: f.name,
+          kind: 'file',
+          parentId: targetParentId,
+          source: 'user',
+          mime,
+          size: f.size,
+          ...(content !== undefined ? { content } : {}),
+        });
+        files.pushNode(node);
+      } else {
+        // v0.32: 二进制（PDF / office / 图片等）走 multipart 真上传，能预览/下载
+        const node = await filesApi.upload(pid, f, targetParentId, 'user');
+        files.pushNode(node);
       }
-      const body: Partial<FileNode> = {
-        name: f.name,
-        kind: 'file',
-        parentId: targetParentId,
-        source: 'user',
-        mime,
-        size: f.size,
-        ...(content !== undefined ? { content } : {}),
-      };
-      const node = await filesApi.create(pid, body);
-      files.pushNode(node);
       okCount += 1;
     } catch (err) {
       console.error('[FileTree native drop] upload failed', f.name, err);

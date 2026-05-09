@@ -168,8 +168,30 @@ function selectChild(c: FileNode) {
   files.selectFile(c.id);
 }
 
+/** v0.32: 是否为后端 multipart 上传的二进制文件（url 以 local-upload:// 开头） */
+function isUploadedBinary(n: FileNode): boolean {
+  return !!n.url && n.url.startsWith('local-upload://');
+}
+
+/** v0.32: 后端下载/inline 端点 URL（pdf iframe / img src / a-tag download 用） */
+function backendDownloadUrl(n: FileNode): string {
+  // url 形如 'local-upload://<pid>/<fid>'
+  if (!isUploadedBinary(n)) return '';
+  const tail = n.url!.slice('local-upload://'.length);
+  return `/patent/api/projects/${tail.split('/')[0]}/files/${tail.split('/')[1]}/download`;
+}
+
 function downloadAsFile(n: FileNode) {
-  // 仅对内联文本可下载；二进制走占位 url
+  // 优先：后端 multipart 上传的二进制 → 直链下载
+  if (isUploadedBinary(n)) {
+    const a = document.createElement('a');
+    a.href = backendDownloadUrl(n);
+    a.download = n.name;
+    a.target = '_blank';
+    a.click();
+    return;
+  }
+  // 内联文本（content 字段）
   if (n.content !== undefined) {
     const blob = new Blob([n.content], { type: n.mime ?? 'text/plain' });
     const url = URL.createObjectURL(blob);
@@ -178,9 +200,10 @@ function downloadAsFile(n: FileNode) {
     a.download = n.name;
     a.click();
     setTimeout(() => URL.revokeObjectURL(url), 100);
-  } else if (n.url) {
-    window.open(n.url, '_blank');
+    return;
   }
+  // url 类型（链接 / 占位）
+  if (n.url) window.open(n.url, '_blank');
 }
 </script>
 
@@ -275,13 +298,26 @@ function downloadAsFile(n: FileNode) {
           <div v-else class="preview-docx" v-html="docxHtml" />
         </div>
 
-        <!-- pdf：元信息 + 下载 -->
-        <div v-else-if="node.mime === 'application/pdf'" class="pp-binary">
-          <p>{{ iconFor(node) }} <strong>{{ node.name }}</strong></p>
-          <p style="color:#888;font-size:13px">
-            类型：PDF · 大小：{{ fmtBytes(node.size) }}
-          </p>
-          <AButton type="primary" @click="downloadAsFile(node)">下载</AButton>
+        <!-- v0.32 pdf：iframe 内嵌预览（如有 binary） -->
+        <div v-else-if="node.mime === 'application/pdf'" class="pp-pdf-wrap">
+          <iframe
+            v-if="isUploadedBinary(node)"
+            :src="backendDownloadUrl(node)"
+            class="pp-pdf-frame"
+            title="PDF preview"
+          />
+          <div v-else class="pp-binary">
+            <p>{{ iconFor(node) }} <strong>{{ node.name }}</strong></p>
+            <p style="color:#888;font-size:13px">类型：PDF · 大小：{{ fmtBytes(node.size) }}</p>
+            <p style="color:#bf6a02;font-size:12px">⚠️ 旧文件元数据：未存 binary，请重新上传以获得预览</p>
+          </div>
+        </div>
+
+        <!-- v0.32 已上传图片：直接 img 渲染 -->
+        <div v-else-if="node.mime && node.mime.startsWith('image/') && isUploadedBinary(node)"
+             style="text-align:center;padding:16px">
+          <img :src="backendDownloadUrl(node)" :alt="node.name"
+               style="max-width:100%;border-radius:8px" />
         </div>
 
         <!-- 链接 -->
@@ -293,11 +329,22 @@ function downloadAsFile(n: FileNode) {
           </a>
         </div>
 
-        <!-- 兜底 -->
+        <!-- v0.32 兜底：office (ppt/pptx/xls/xlsx) / 其他二进制 — 不预览但可下载 -->
         <div v-else class="pp-binary">
-          <p>{{ iconFor(node) }} {{ node.name }}</p>
-          <p style="color:#888;font-size:13px">类型：{{ node.mime ?? '未知' }}</p>
-          <AButton @click="downloadAsFile(node)" :disabled="!node.content && !node.url">下载</AButton>
+          <p style="font-size:18px">{{ iconFor(node) }} <strong>{{ node.name }}</strong></p>
+          <p style="color:#888;font-size:13px">
+            类型：{{ node.mime ?? '未知' }}
+            <span v-if="node.size != null"> · 大小：{{ fmtBytes(node.size) }}</span>
+          </p>
+          <p v-if="!isUploadedBinary(node) && node.content === undefined" style="color:#bf6a02;font-size:12px">
+            ⚠️ 旧文件元数据：未存 binary，请重新上传
+          </p>
+          <p v-else style="color:#888;font-size:12px">该格式暂不支持内嵌预览，可下载到本地查看</p>
+          <AButton type="primary"
+                   :disabled="!isUploadedBinary(node) && node.content === undefined && !node.url"
+                   @click="downloadAsFile(node)">
+            📥 下载到本地
+          </AButton>
         </div>
       </div>
     </template>
@@ -519,6 +566,20 @@ function downloadAsFile(n: FileNode) {
 .pp-binary p { margin: var(--pp-space-2) 0; }
 
 .pp-docx-wrap { height: 100%; }
+/* v0.32: PDF iframe 内嵌预览容器 */
+.pp-pdf-wrap {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+}
+.pp-pdf-frame {
+  width: 100%;
+  height: 100%;
+  min-height: 70vh;
+  border: 0;
+  border-radius: var(--pp-radius-md);
+  background: var(--pp-color-bg);
+}
 .preview-docx {
   padding: 20px 28px;
   font-size: 14px;
