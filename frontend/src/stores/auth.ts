@@ -34,6 +34,18 @@ export const useAuthStore = defineStore('auth', () => {
     return u;
   }
 
+  /** v0.28：账号 + 密码登录 */
+  async function loginWithPassword(username: string, password: string): Promise<User> {
+    const { authApi } = await import('@/api/auth');
+    const { token: tk, user: u } = await authApi.loginWithPassword(username, password);
+    user.value = u;
+    token.value = tk || null;
+    localStorage.setItem(KEY, JSON.stringify(u));
+    if (tk) localStorage.setItem(TOKEN_KEY, tk);
+    else localStorage.removeItem(TOKEN_KEY);
+    return u;
+  }
+
   function login(u: User, tk?: string) {
     user.value = u;
     localStorage.setItem(KEY, JSON.stringify(u));
@@ -78,7 +90,7 @@ export const useAuthStore = defineStore('auth', () => {
 
   return {
     user, token, role, isAuthenticated,
-    login, loginAs, logout,
+    login, loginAs, loginWithPassword, logout,
     loginViaCas, consumeCasCallback,
   };
 });

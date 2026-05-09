@@ -18,5 +18,8 @@ export const authApi = {
       return { token: '', user: r.data };
     }
   },
+  /** v0.28: 真账密登录 */
+  loginWithPassword: (username: string, password: string): Promise<LoginResponse> =>
+    apiClient.post<LoginResponse>('/auth/login', { username, password }).then(r => r.data),
   me: () => apiClient.get<User>('/auth/me').then(r => r.data),
 };

@@ -28,9 +28,14 @@ router = APIRouter(prefix="/auth", tags=["auth"])
 
 
 class LoginRequest(BaseModel):
-    """v0.21：JWT 登录入参。userId 可选，不传则按 role 取 DEMO 用户首位。"""
+    """登录入参，两种模式：
+    - v0.28 真账密：传 username + password（推荐）
+    - v0.21 fake：传 role + 可选 userId（dev 模式 / fallback；生产前端隐藏）
+    """
+    username: Optional[str] = None
+    password: Optional[str] = None
     userId: Optional[str] = None
-    role: str  # 'employee' | 'admin'
+    role: Optional[str] = None  # 'employee' | 'admin'
 
 
 class LoginResponse(BaseModel):
@@ -94,23 +99,30 @@ def get_current_user(
 
 @router.post("/login", response_model=LoginResponse)
 def login(req: LoginRequest, db: Session = Depends(get_db)):
-    """v0.21：根据 role + 可选 userId 发一个 JWT。fake auth：不校验密码。"""
-    if req.role not in ("employee", "admin"):
-        raise HTTPException(400, "role must be employee | admin")
+    """v0.28：username + password 真校验；保留 v0.21 role 路径作 dev fallback。"""
+    from sqlalchemy import select
+    from ..fixtures import verify_password
 
-    # 解析 user：优先 DB by id，回落 DEMO_USERS by role
     user_obj = None
-    if req.userId:
-        u = db.get(User, req.userId)
-        if u:
-            user_obj = u
+
+    # 模式 1：账密
+    if req.username and req.password:
+        u = db.scalar(select(User).where(User.username == req.username))
+        if not u or not verify_password(req.password, u.password_hash):
+            raise HTTPException(401, "用户名或密码错误")
+        user_obj = u
+
+    # 模式 2：role/userId fallback（dev / 兼容老前端）
     if user_obj is None:
-        demo = next((u for u in DEMO_USERS if u.role == req.role), None)
-        if not demo:
-            raise HTTPException(404, "no demo user for role")
-        # 也尝试从 DB 拿（seed 已写入）
-        u = db.get(User, demo.id)
-        user_obj = u or demo
+        if req.role not in ("employee", "admin"):
+            raise HTTPException(400, "请提供 username+password，或 role")
+        if req.userId:
+            user_obj = db.get(User, req.userId)
+        if user_obj is None:
+            demo = next((u for u in DEMO_USERS if u.role == req.role), None)
+            if not demo:
+                raise HTTPException(404, "no demo user for role")
+            user_obj = db.get(User, demo.id) or demo
 
     user_dict = (
         user_obj.__dict__

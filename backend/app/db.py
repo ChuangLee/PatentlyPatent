@@ -80,3 +80,13 @@ def init_db():
             conn.execute(text("ALTER TABLE projects ADD COLUMN archived INTEGER DEFAULT 0"))
         except Exception:
             pass  # column already exists
+        # v0.28: 幂等迁移 — 给老 users 表补 username / password_hash
+        for ddl in (
+            "ALTER TABLE users ADD COLUMN username VARCHAR(64)",
+            "ALTER TABLE users ADD COLUMN password_hash VARCHAR(256)",
+            "CREATE UNIQUE INDEX IF NOT EXISTS ux_users_username ON users(username)",
+        ):
+            try:
+                conn.execute(text(ddl))
+            except Exception:
+                pass

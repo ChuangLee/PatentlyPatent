@@ -19,6 +19,9 @@ class User(Base):
     role: Mapped[str] = mapped_column(String(16))   # 'employee' | 'admin'
     department: Mapped[str] = mapped_column(String(128))
     avatar: Mapped[str | None] = mapped_column(String(256), nullable=True)
+    # v0.28: 账号密码登录（fake auth → 真账密）
+    username: Mapped[str | None] = mapped_column(String(64), unique=True, nullable=True, index=True)
+    password_hash: Mapped[str | None] = mapped_column(String(256), nullable=True)
 
 
 class Project(Base):

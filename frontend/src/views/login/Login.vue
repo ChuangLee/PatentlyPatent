@@ -13,6 +13,32 @@ const auth = useAuthStore();
 const casEnabled = ref(false);
 const loading = ref<Role | null>(null);
 const year = new Date().getFullYear();
+
+// v0.28: 账密登录
+const loginUsername = ref('');
+const loginPassword = ref('');
+const passwordLoading = ref(false);
+
+async function loginByPassword() {
+  if (passwordLoading.value) return;
+  const u = loginUsername.value.trim();
+  const p = loginPassword.value;
+  if (!u || !p) {
+    message.warning('请输入用户名和密码');
+    return;
+  }
+  passwordLoading.value = true;
+  try {
+    const user = await auth.loginWithPassword(u, p);
+    message.success(`欢迎回来，${user.name}`);
+    router.push(user.role === 'admin' ? '/admin/dashboard' : '/employee/dashboard');
+  } catch (e: any) {
+    const msg = e?.response?.data?.detail || e?.message || '登录失败';
+    message.error(msg);
+  } finally {
+    passwordLoading.value = false;
+  }
+}
 // v0.26：仅在 dev 模式（`vite`/`vite dev`）下显示「dev 模式选角色」入口；
 // 生产构建（`vite build`）时 import.meta.env.DEV === false，员工/管理员一键登录全部隐藏。
 const isDev = import.meta.env.DEV === true;
@@ -130,10 +156,43 @@ const features = [
           🏢 &nbsp;使用企业 CAS 登录
         </a-button>
 
-        <!-- 生产环境且未启用 CAS：给提示，不暴露 dev 入口 -->
-        <div v-if="!isDev && !casEnabled" class="pp-login__cas-hint">
-          请联系管理员配置 CAS 单点登录 (PP_CAS_ENABLED=1)
-        </div>
+        <!-- v0.28: 账号密码登录（始终显示） -->
+        <div v-if="casEnabled" class="pp-login__divider"><span>— 或账号登录 —</span></div>
+        <form class="pp-login__pwd" @submit.prevent="loginByPassword">
+          <a-input
+            v-model:value="loginUsername"
+            size="large"
+            placeholder="用户名"
+            autocomplete="username"
+            :disabled="passwordLoading"
+          >
+            <template #prefix>👤</template>
+          </a-input>
+          <a-input-password
+            v-model:value="loginPassword"
+            size="large"
+            placeholder="密码"
+            autocomplete="current-password"
+            :disabled="passwordLoading"
+            @press-enter="loginByPassword"
+          >
+            <template #prefix>🔒</template>
+          </a-input-password>
+          <a-button
+            type="primary"
+            size="large"
+            block
+            html-type="submit"
+            :loading="passwordLoading"
+          >
+            登录
+          </a-button>
+        </form>
+        <p class="pp-login__demo-hint">
+          测试账号：
+          <code>user / user123</code>（员工） ·
+          <code>admin / admin123</code>（管理员）
+        </p>
 
         <!-- 仅 dev / staging 模式（vite dev）显示快速选角色入口 -->
         <template v-if="isDev">
@@ -350,6 +409,30 @@ const features = [
   color: var(--pp-color-text-tertiary);
   font-size: 12px;
   margin: var(--pp-space-4) 0;
+}
+.pp-login__pwd {
+  display: flex;
+  flex-direction: column;
+  gap: var(--pp-space-3);
+  margin-top: var(--pp-space-2);
+}
+.pp-login__demo-hint {
+  margin-top: var(--pp-space-3);
+  padding: var(--pp-space-2) var(--pp-space-3);
+  background: var(--pp-color-primary-soft);
+  border-radius: var(--pp-radius-sm);
+  font-size: 12px;
+  color: var(--pp-color-text-secondary);
+  line-height: 1.6;
+  text-align: center;
+}
+.pp-login__demo-hint code {
+  background: var(--pp-color-surface);
+  padding: 1px 6px;
+  border-radius: 4px;
+  font-family: var(--pp-font-mono);
+  font-size: 11.5px;
+  color: var(--pp-color-primary);
 }
 .pp-login__divider::before,
 .pp-login__divider::after {
