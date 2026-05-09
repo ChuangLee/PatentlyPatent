@@ -359,26 +359,38 @@ function onCancel() {
   z-index: 1;
   pointer-events: none;
 }
-/* v0.27 fix: close 叉号悬浮于渐变条之上，避免被圆角切一半 */
+/* v0.29 fix: close 按钮完全收进 24px 渐变条内，避免下半与 modal-header 标题重叠/被切 */
 .pp-newproj-wrap .ant-modal-close {
   z-index: 10;
-  top: 4px !important;
-  right: 4px !important;
-  width: 32px !important;
-  height: 32px !important;
-  border-radius: var(--pp-radius-sm);
-  display: flex !important;
-  align-items: center;
-  justify-content: center;
+  top: 0 !important;
+  right: 0 !important;
+  width: 48px !important;
+  height: 24px !important;     /* 与渐变条同高，整体落在渐变条内 */
+  border-radius: 0 var(--pp-radius-lg) 0 var(--pp-radius-sm);
+  display: inline-flex !important;
+  align-items: center !important;
+  justify-content: center !important;
   color: #fff;
+  padding: 0 !important;
+  margin: 0 !important;
 }
 .pp-newproj-wrap .ant-modal-close-x {
+  display: inline-flex !important;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  height: 100%;
   color: #fff !important;
   font-size: 14px;
   line-height: 1;
 }
+.pp-newproj-wrap .ant-modal-close .ant-modal-close-icon,
+.pp-newproj-wrap .ant-modal-close svg {
+  font-size: 14px;
+  color: #fff;
+}
 .pp-newproj-wrap .ant-modal-close:hover {
-  background: rgba(255, 255, 255, 0.20);
+  background: rgba(255, 255, 255, 0.22);
   color: #fff;
 }
 .pp-newproj-wrap .ant-modal-header {
