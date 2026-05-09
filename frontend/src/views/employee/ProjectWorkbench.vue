@@ -185,13 +185,16 @@ onMounted(async () => {
     }
   }
 
-  // v0.33: 进工作台时如果是首次（无历史对话 + 项目仍 drafting），自动启动挖掘
-  // 不等用户先发送消息 — agent 立即开干，需要追问时主动问
-  const isFreshDraft = !restored
-    && !resumed
-    && chat.messages.length === 0
+  // v0.33 + v0.34.3: 没接管运行中 run + 没历史回放 → 自动启动挖掘
+  // 关键：不限制 status='drafting'（auto-mining 后台会改成 researching）
+  // 关键：用 hasMeaningfulContent 而不是 length===0（attach 已清掉空 agent 残留）
+  const hasMeaningfulContent = chat.messages.some(
+    m => m.role === 'user' || (m.content && m.content.trim().length > 0),
+  );
+  const isFreshDraft = !resumed
+    && !hasMeaningfulContent
     && project.value
-    && project.value.status === 'drafting'
+    && project.value.status !== 'completed'
     && !isReadonly.value;
   if (isFreshDraft) {
     // 给一点时间让 chat 组件挂载完成

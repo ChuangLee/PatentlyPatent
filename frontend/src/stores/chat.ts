@@ -66,7 +66,18 @@ export const useChatStore = defineStore('chat', () => {
     const cached = load(pid);
     if (cached) {
       // v0.18-C 兼容：老数据无 type 字段，回填 'text'
-      messages.value = cached.messages.map(m => ({ ...m, type: m.type ?? 'text' }));
+      let msgs = cached.messages.map(m => ({ ...m, type: m.type ?? 'text' }));
+      // v0.34.3 fix: 清掉末尾「空 agent 气泡」残留（上次 startAgent 但 SSE 中断没收到 delta）
+      // 否则恢复进工作台时永远显示一个空气泡 + 卡住的 streaming 光标
+      while (msgs.length) {
+        const last = msgs[msgs.length - 1];
+        const isStaleEmpty = last.role === 'agent'
+          && (last.type ?? 'text') === 'text'
+          && (!last.content || last.content.trim() === '');
+        if (!isStaleEmpty) break;
+        msgs = msgs.slice(0, -1);
+      }
+      messages.value = msgs;
       capturedFields.value = cached.capturedFields ?? [];
       currentRunId.value = cached.currentRunId ?? null;
       lastEventSeq.value = cached.lastEventSeq ?? 0;
