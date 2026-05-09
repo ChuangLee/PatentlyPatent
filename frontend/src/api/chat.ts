@@ -1,5 +1,6 @@
 import type { ChatStreamEvent } from '@/types';
 import { consumeSSE } from '@/utils/sse';
+import { apiClient } from './client';
 
 export type AutoMineCtx = {
   title?: string;
@@ -39,12 +40,17 @@ export interface StartRunBody {
   sections?: string[];
 }
 
+/** v0.34 fix: axios baseURL（prod=/patent/api, dev=/api），SSE 用 fetch 时也要走它 */
+function _apiBase(): string {
+  return (apiClient.defaults.baseURL ?? '/api').replace(/\/$/, '');
+}
+
 export const chatApi = {
   /** 发一轮对话，回调每个 SSE 事件 */
   stream(projectId: string, round: number, userMsg: string,
          onEvent: (e: ChatStreamEvent) => void,
          signal?: AbortSignal): Promise<void> {
-    return consumeSSE(`/api/projects/${projectId}/chat`, {
+    return consumeSSE(`${_apiBase()}/projects/${projectId}/chat`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ round, userMsg }),
@@ -54,7 +60,7 @@ export const chatApi = {
   /** 进入工作台时自动触发：AI 自己挖掘 */
   autoMine(projectId: string, ctx: AutoMineCtx, onEvent: (e: ChatStreamEvent) => void,
            signal?: AbortSignal): Promise<void> {
-    return consumeSSE(`/api/projects/${projectId}/auto-mining`, {
+    return consumeSSE(`${_apiBase()}/projects/${projectId}/auto-mining`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(ctx),
@@ -64,7 +70,7 @@ export const chatApi = {
   /** v0.17-D: agent SDK spike 路径（admin toggle 用） */
   agentMineSpike(idea: string, onEvent: (e: ChatStreamEvent) => void,
                  signal?: AbortSignal, maxTurns = 8): Promise<void> {
-    return consumeSSE(`/api/agent/mine_spike`, {
+    return consumeSSE(`${_apiBase()}/agent/mine_spike`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ idea, max_turns: maxTurns }),
@@ -74,7 +80,7 @@ export const chatApi = {
   /** v0.21: agent SDK 一键全程挖掘 — 串跑 5 节 (prior_art / summary / embodiments / claims / drawings_description) */
   mineFullStream(projectId: string, idea: string, onEvent: (e: ChatStreamEvent) => void,
                  signal?: AbortSignal): Promise<void> {
-    return consumeSSE(`/api/agent/mine_full/${projectId}`, {
+    return consumeSSE(`${_apiBase()}/agent/mine_full/${projectId}`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ idea }),
@@ -87,47 +93,45 @@ export const chatApi = {
    */
   agentRuns: {
     async start(body: StartRunBody): Promise<{ run_id: string }> {
-      const r = await fetch('/api/agent/runs/start', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(body),
-      });
-      if (!r.ok) throw new Error(`start run failed: ${r.status} ${await r.text()}`);
-      return r.json();
+      // v0.34 fix: 用 apiClient(axios) 走 baseURL，prod=/patent/api，dev=/api
+      const r = await apiClient.post<{ run_id: string }>('/agent/runs/start', body);
+      return r.data;
     },
 
     async active(projectId: string): Promise<AgentRun | null> {
-      const r = await fetch(`/api/agent/runs/active?project_id=${encodeURIComponent(projectId)}`);
-      if (!r.ok) throw new Error(`active run lookup failed: ${r.status}`);
-      const txt = await r.text();
-      if (!txt || txt === 'null') return null;
-      return JSON.parse(txt) as AgentRun;
+      const r = await apiClient.get<AgentRun | null>('/agent/runs/active', {
+        params: { project_id: projectId },
+      });
+      return r.data || null;
     },
 
     async get(runId: string): Promise<AgentRun> {
-      const r = await fetch(`/api/agent/runs/${encodeURIComponent(runId)}`);
-      if (!r.ok) throw new Error(`get run failed: ${r.status}`);
-      return r.json();
+      const r = await apiClient.get<AgentRun>(`/agent/runs/${encodeURIComponent(runId)}`);
+      return r.data;
     },
 
     async events(runId: string, since = 0): Promise<AgentEventRow[]> {
-      const r = await fetch(`/api/agent/runs/${encodeURIComponent(runId)}/events?since=${since}`);
-      if (!r.ok) throw new Error(`get events failed: ${r.status}`);
-      return r.json();
+      const r = await apiClient.get<AgentEventRow[]>(
+        `/agent/runs/${encodeURIComponent(runId)}/events`,
+        { params: { since } },
+      );
+      return r.data;
     },
 
     async cancel(runId: string): Promise<{ ok: boolean; status: string }> {
-      const r = await fetch(`/api/agent/runs/${encodeURIComponent(runId)}/cancel`, { method: 'POST' });
-      if (!r.ok) throw new Error(`cancel failed: ${r.status}`);
-      return r.json();
+      const r = await apiClient.post<{ ok: boolean; status: string }>(
+        `/agent/runs/${encodeURIComponent(runId)}/cancel`,
+      );
+      return r.data;
     },
 
-    /** SSE tail：since=N 起拉历史 events 后实时跟进。 */
+    /** SSE tail：since=N 起拉历史 events 后实时跟进；URL 走 axios baseURL */
     stream(runId: string, since: number,
            onEvent: (e: ChatStreamEvent) => void,
            signal?: AbortSignal): Promise<void> {
+      const base = (apiClient.defaults.baseURL ?? '/api').replace(/\/$/, '');
       return consumeSSE(
-        `/api/agent/runs/${encodeURIComponent(runId)}/stream?since=${since}`,
+        `${base}/agent/runs/${encodeURIComponent(runId)}/stream?since=${since}`,
         { method: 'GET' },
         onEvent,
         signal,
