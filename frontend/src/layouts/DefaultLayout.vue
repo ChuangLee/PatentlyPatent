@@ -633,7 +633,8 @@ function tutorialStartNow() {
 }
 .pp-proj-item {
   position: relative;
-  padding: 8px 10px 8px 14px;
+  /* v0.34.2 fix: 右 padding 留 32px 给绝对定位的「⋯」按钮，避免标题文字被覆盖 */
+  padding: 8px 32px 8px 14px;
   border-radius: var(--pp-radius-md);
   cursor: pointer;
   border: 1px solid transparent;
