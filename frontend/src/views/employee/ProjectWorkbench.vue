@@ -6,6 +6,7 @@
 import { onMounted, ref, computed } from 'vue';
 import { useRoute } from 'vue-router';
 import { projectsApi } from '@/api/projects';
+import { chatApi } from '@/api/chat';
 import { useChatStore } from '@/stores/chat';
 import { useFilesStore } from '@/stores/files';
 import { useAuthStore } from '@/stores/auth';
@@ -153,9 +154,41 @@ onMounted(async () => {
     round.value = chat.messages.filter(m => m.role === 'agent').length + 1;
   }
 
+  // v0.34: 优先检查后端是否有 in-flight run（detached 跑着的）— 接管恢复
+  let resumed = false;
+  if (project.value && !isReadonly.value) {
+    try {
+      const active = await chatApi.agentRuns.active(project.value.id);
+      if (active && active.status === 'running') {
+        // 用 sessionStorage 缓存的 lastEventSeq 续传
+        const since = chat.currentRunId === active.id ? (chat.lastEventSeq || 0) : 0;
+        // 让 chat 组件挂载后调用 resumeRun
+        setTimeout(() => {
+          if (chatRef.value) chatRef.value.resumeRun(active.id, since);
+        }, 100);
+        resumed = true;
+      } else if (chat.currentRunId) {
+        // 本地 run id 但服务端已终态：拉历史 events 一次性回放
+        const rid = chat.currentRunId;
+        try {
+          const info = await chatApi.agentRuns.get(rid);
+          if (info.status !== 'running') {
+            setTimeout(() => {
+              if (chatRef.value) chatRef.value.resumeRun(rid, 0);
+            }, 100);
+            resumed = true;
+          }
+        } catch { /* run 不存在了：忽略 */ }
+      }
+    } catch (e) {
+      console.warn('[active run lookup]', (e as Error).message);
+    }
+  }
+
   // v0.33: 进工作台时如果是首次（无历史对话 + 项目仍 drafting），自动启动挖掘
   // 不等用户先发送消息 — agent 立即开干，需要追问时主动问
   const isFreshDraft = !restored
+    && !resumed
     && chat.messages.length === 0
     && project.value
     && project.value.status === 'drafting'

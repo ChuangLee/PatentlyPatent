@@ -53,13 +53,15 @@ describe('consumeSSE', () => {
     fetchSpy.mockRestore();
   });
 
-  it('未知事件类型被忽略', async () => {
+  // v0.34: parser 改为透传所有事件类型（detached run 需要 section_start / stream_end 等扩展事件）
+  it('未知事件类型透传给 handler（v0.34 后）', async () => {
     const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValue(
       makeStreamingResponse(['event: weird\ndata: {}\n\n'])
     );
     const events: ChatStreamEvent[] = [];
     await consumeSSE('/api/test', { method: 'POST' }, e => events.push(e));
-    expect(events).toEqual([]);
+    expect(events.length).toBeGreaterThanOrEqual(1);
+    expect((events[0] as any).type).toBe('weird');
     fetchSpy.mockRestore();
   });
 

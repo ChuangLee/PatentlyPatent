@@ -68,6 +68,9 @@ def init_db():
         "CREATE INDEX IF NOT EXISTS ix_projects_status        ON projects(status)",
         "CREATE INDEX IF NOT EXISTS ix_file_nodes_proj_parent ON file_nodes(project_id, parent_id)",
         "CREATE INDEX IF NOT EXISTS ix_file_nodes_proj_source ON file_nodes(project_id, source)",
+        # v0.34: detached agent runs / events
+        "CREATE INDEX IF NOT EXISTS ix_agent_runs_proj_status  ON agent_runs(project_id, status)",
+        "CREATE INDEX IF NOT EXISTS ix_agent_events_run_seq    ON agent_events(run_id, seq)",
     ]
     with engine.begin() as conn:
         for ddl in indices:

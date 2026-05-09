@@ -7,6 +7,9 @@ const KEY_PREFIX = 'pp.chat.';
 interface PersistShape {
   messages: ChatMessage[];
   capturedFields: string[];
+  // v0.34: detached agent run 的 id（断线重连用）
+  currentRunId?: string | null;
+  lastEventSeq?: number;
 }
 
 // v0.20 Wave1: 5 个章节的进度状态
@@ -28,12 +31,17 @@ export const useChatStore = defineStore('chat', () => {
   const capturedFields = ref<string[]>([]);
   // v0.20 Wave1: section 进度（不持久化，每次 attach 复位）
   const sectionProgress = ref<Record<string, SectionStatus>>({ ...DEFAULT_SECTION_PROGRESS });
+  // v0.34: detached agent run id（持久化到 sessionStorage，断线重连用）
+  const currentRunId = ref<string | null>(null);
+  const lastEventSeq = ref<number>(0);
 
   function persist() {
     if (!projectId.value) return;
     const payload: PersistShape = {
       messages: messages.value,
       capturedFields: capturedFields.value,
+      currentRunId: currentRunId.value,
+      lastEventSeq: lastEventSeq.value,
     };
     sessionStorage.setItem(KEY_PREFIX + projectId.value, JSON.stringify(payload));
   }
@@ -60,13 +68,31 @@ export const useChatStore = defineStore('chat', () => {
       // v0.18-C 兼容：老数据无 type 字段，回填 'text'
       messages.value = cached.messages.map(m => ({ ...m, type: m.type ?? 'text' }));
       capturedFields.value = cached.capturedFields ?? [];
+      currentRunId.value = cached.currentRunId ?? null;
+      lastEventSeq.value = cached.lastEventSeq ?? 0;
     } else {
       messages.value = [];
       capturedFields.value = [];
+      currentRunId.value = null;
+      lastEventSeq.value = 0;
     }
     streaming.value = false;
     // section 进度每次 attach 复位
     sectionProgress.value = { ...DEFAULT_SECTION_PROGRESS };
+  }
+
+  function setCurrentRun(runId: string | null) {
+    currentRunId.value = runId;
+    if (runId === null) lastEventSeq.value = 0;
+    persist();
+  }
+
+  function bumpLastSeq(seq: number) {
+    if (seq > lastEventSeq.value) {
+      lastEventSeq.value = seq;
+      // 节流：每 10 个 event 才落一次盘，避免反复 sessionStorage write
+      if (seq % 10 === 0) persist();
+    }
   }
 
   /** v0.20 Wave1: 设置某个 section 的状态 */
@@ -192,5 +218,7 @@ export const useChatStore = defineStore('chat', () => {
     appendToolCall, attachToolResult, appendThinking, appendError,
     // v0.20 Wave1 section 进度
     sectionProgress, setSectionStatus, resetSectionProgress,
+    // v0.34: detached run 持久化
+    currentRunId, lastEventSeq, setCurrentRun, bumpLastSeq,
   };
 });

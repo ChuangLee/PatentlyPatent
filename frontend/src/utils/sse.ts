@@ -46,13 +46,22 @@ function parseSSEBlock(block: string): ChatStreamEvent | null {
     else if (line.startsWith('data:')) data = line.slice(5).trim();
   }
   if (!type) return null;
-  if (type === 'thinking') return { type: 'thinking' };
-  if (type === 'done') return { type: 'done' };
   let parsed: any = {};
-  try { parsed = data ? JSON.parse(data) : {}; } catch { return null; }
+  try { parsed = data ? JSON.parse(data) : {}; } catch { /* keep parsed={} */ }
+  // 已知 typed event：保留原结构（向后兼容）
+  if (type === 'thinking') {
+    if (parsed && typeof parsed.text === 'string') return { type: 'thinking', text: parsed.text } as any;
+    return { type: 'thinking' };
+  }
+  if (type === 'done') return { type: 'done', ...parsed };
   if (type === 'delta' && typeof parsed.chunk === 'string')
     return { type: 'delta', chunk: parsed.chunk };
+  // v0.20: agent_sdk 路径的 delta 用 text 字段
+  if (type === 'delta' && typeof parsed.text === 'string')
+    return { type: 'delta', chunk: parsed.text } as any;
   if (type === 'fields' && Array.isArray(parsed.captured))
     return { type: 'fields', captured: parsed.captured };
-  return null;
+  // v0.34: 透传所有未知事件（tool_use/tool_result/file/error/section_start/section_done/stream_end…）
+  // 把 SSE event 名作为 type，data 内字段直接附上
+  return { type, ...parsed } as any;
 }

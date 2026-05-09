@@ -66,6 +66,33 @@ class FileNode(Base):
     project: Mapped["Project"] = relationship(back_populates="files")
 
 
+class AgentRun(Base):
+    """v0.34: detached agent run — 客户端断开后仍跑到底，前端可重连恢复。"""
+    __tablename__ = "agent_runs"
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)   # run_id "r-xxx"
+    project_id: Mapped[Optional[str]] = mapped_column(String(64), index=True, nullable=True)
+    endpoint: Mapped[str] = mapped_column(String(32))                # 'mine_full' / 'mine_spike' / 'ab_compare'
+    status: Mapped[str] = mapped_column(String(16), default="running")  # 'running'|'completed'|'error'|'cancelled'
+    idea: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
+    finished_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    total_cost_usd: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    num_turns: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    error: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+
+
+class AgentEvent(Base):
+    """v0.34: 持久化每个 agent 事件，前端断线重连时按 seq 重放 + tail。"""
+    __tablename__ = "agent_events"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    run_id: Mapped[str] = mapped_column(String(64), index=True)
+    project_id: Mapped[Optional[str]] = mapped_column(String(64), index=True, nullable=True)
+    seq: Mapped[int] = mapped_column(Integer)              # run 内自增序号
+    type: Mapped[str] = mapped_column(String(32))          # thinking/tool_use/tool_result/delta/file/done/error/section_start/section_done
+    payload: Mapped[dict] = mapped_column(JSON)            # 完整事件 dict
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
+
+
 class AgentRunLog(Base):
     """v0.19: agent 调用 observability 日志表。
     每次跑 agent 入口（mine_spike / ab_compare / prior_art_smart 等）写一行。
