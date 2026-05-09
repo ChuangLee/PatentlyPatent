@@ -152,6 +152,42 @@ onMounted(async () => {
   if (chat.messages.length) {
     round.value = chat.messages.filter(m => m.role === 'agent').length + 1;
   }
+
+  // v0.33: 进工作台时如果是首次（无历史对话 + 项目仍 drafting），自动启动挖掘
+  // 不等用户先发送消息 — agent 立即开干，需要追问时主动问
+  const isFreshDraft = !restored
+    && chat.messages.length === 0
+    && project.value
+    && project.value.status === 'drafting'
+    && !isReadonly.value;
+  if (isFreshDraft) {
+    // 给一点时间让 chat 组件挂载完成
+    setTimeout(() => {
+      if (!chatRef.value || chat.streaming) return;
+      const idea = [
+        project.value!.title,
+        project.value!.description,
+        project.value!.intake?.notes,
+      ].filter(Boolean).join('\n');
+      // agent_sdk 模式优先 mineFull，老 mining 模式走 autoMine
+      const ctx = {
+        title: project.value!.title,
+        domain: project.value!.domain,
+        customDomain: project.value!.customDomain,
+        description: project.value!.description,
+        intake: project.value!.intake,
+      };
+      if (ui.agentMode === 'agent_sdk') {
+        chatRef.value.mineFull(idea || '（无描述）').catch((e: any) => {
+          console.warn('[auto mineFull on enter] failed:', e?.message || e);
+        });
+      } else {
+        chatRef.value.autoMine(ctx).catch((e: any) => {
+          console.warn('[auto autoMine on enter] failed:', e?.message || e);
+        });
+      }
+    }, 300);
+  }
 });
 
 function onRoundComplete() {
