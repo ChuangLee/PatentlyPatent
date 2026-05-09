@@ -32,8 +32,11 @@ class Settings(BaseModel):
         f"sqlite:///{PROJECT_ROOT / 'backend' / 'patentlypatent.db'}",
     )
 
-    # 项目存储根
-    storage_root: Path = PROJECT_ROOT / "backend" / "storage"
+    # 项目存储根（PP_STORAGE_ROOT env 可覆盖；测试时 conftest 指 tmp）
+    storage_root: Path = Path(os.environ.get(
+        "PP_STORAGE_ROOT",
+        str(PROJECT_ROOT / "backend" / "storage"),
+    ))
 
     # LLM
     anthropic_api_key: str = os.environ.get("ANTHROPIC_API_KEY", "")
