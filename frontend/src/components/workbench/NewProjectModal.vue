@@ -103,15 +103,21 @@ function onUploadChange(info: { fileList: { uid: string }[] }) {
   }
 }
 
+// v0.35.3: 保留二进制原 File 对象，报门后用 multipart 传到 /files/upload
+// 文本类仍走 attachments JSON（后端 create_project 把 content 存到 FileNode.content）
+const pendingBinaries = new Map<string, File>();   // attachment id → File
+
 /** v0.31: 通用入队，单文件 → attachment，自动加视觉脉动 */
 async function _enqueueAttachment(file: File, sourceTag = '') {
   const mime = inferMimeByName(file.name, file.type || '');
   let content: string | undefined;
-  if (isTextLike(file.name, mime) && file.size <= 2 * 1024 * 1024) {
+  const isText = isTextLike(file.name, mime) && file.size <= 2 * 1024 * 1024;
+  if (isText) {
     try { content = await readAsText(file); } catch { /* 忽略 */ }
   }
+  const attId = genId();
   attachments.value.push({
-    id: genId(),
+    id: attId,
     type: 'file',
     name: sourceTag ? `${sourceTag}/${file.name}` : file.name,
     size: file.size,
@@ -119,6 +125,10 @@ async function _enqueueAttachment(file: File, sourceTag = '') {
     content,
     addedAt: new Date().toISOString(),
   });
+  // v0.35.3: 二进制（pdf/office/图片 etc）保留 File 对象，报门后走 multipart
+  if (!isText) {
+    pendingBinaries.set(attId, file);
+  }
   recentlyAddedFlash.value += 1;
 }
 
@@ -173,6 +183,7 @@ async function beforeUpload(file: File): Promise<boolean> {
 
 function removeAt(id: string) {
   attachments.value = attachments.value.filter(a => a.id !== id);
+  pendingBinaries.delete(id);
 }
 
 function fileIcon(mime?: string): string {
@@ -205,6 +216,7 @@ function reset() {
   form.goal = 'full_disclosure';
   form.notes = '';
   attachments.value = [];
+  pendingBinaries.clear();
   uploadIndex.value = 0;
   uploadTotal.value = 0;
   uploadCurrentName.value = '';
@@ -226,14 +238,34 @@ async function onOk() {
       : (DOMAINS.find(d => d.value === form.domain)?.label ?? form.domain);
     const description = form.notes.trim()
       || `领域=${domainShown}, 阶段=${form.stage}, 期望=${form.goal}（员工未填补充说明）`;
+    // 仅文本类 attachment 走 JSON content；二进制不传（待会 multipart 上传）
+    const textAttachments = attachments.value.filter(a => !pendingBinaries.has(a.id));
     const p = await projectsApi.create({
       title: form.title.trim(),
       description,
       domain: form.domain,
       customDomain: form.domain === 'other' ? form.customDomain.trim() : undefined,
       ownerId: auth.user!.id,
-      attachments: attachments.value.length ? attachments.value : undefined,
+      attachments: textAttachments.length ? textAttachments : undefined,
     });
+
+    // v0.35.3: 二进制 attachment 走 multipart 上传到「我的资料/」（root-user-{pid}）
+    if (pendingBinaries.size > 0) {
+      const { filesApi } = await import('@/api/files');
+      const rootUserId = `root-user-${p.id}`;
+      let okCount = 0;
+      for (const [attId, file] of pendingBinaries) {
+        try {
+          await filesApi.upload(p.id, file, rootUserId, 'user');
+          okCount += 1;
+        } catch (e) {
+          console.error('[NewProject upload]', file.name, e);
+        }
+        void attId;
+      }
+      if (okCount > 0) message.success(`已上传 ${okCount} 个文件到「我的资料」`);
+    }
+
     message.success('已创建，进入项目工作台');
     emit('created', p.id);
     emit('update:open', false);
