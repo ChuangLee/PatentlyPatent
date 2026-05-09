@@ -13,7 +13,9 @@ interface UIState {
 }
 
 function load(): UIState {
-  const fallback: UIState = { theme: 'light', sidebarCollapsed: false, workbenchSplitView: false, agentMode: 'mining' };
+  // v0.35.5: 默认 agent_sdk 走真 LLM（agent SDK + claude CLI OAuth）
+  // mining 老路径需要 ANTHROPIC_API_KEY，当前 prod 未配置 → 默认走 mock 字符串
+  const fallback: UIState = { theme: 'light', sidebarCollapsed: false, workbenchSplitView: false, agentMode: 'agent_sdk' };
   if (typeof localStorage === 'undefined') return fallback;
   try {
     const parsed = JSON.parse(localStorage.getItem(KEY) ?? '') as UIState;
@@ -21,7 +23,7 @@ function load(): UIState {
       theme: parsed.theme ?? 'light',
       sidebarCollapsed: parsed.sidebarCollapsed ?? false,
       workbenchSplitView: parsed.workbenchSplitView ?? false,
-      agentMode: parsed.agentMode ?? 'mining',
+      agentMode: parsed.agentMode ?? 'agent_sdk',
     };
   }
   catch { return fallback; }
@@ -32,7 +34,7 @@ export const useUIStore = defineStore('ui', () => {
   const theme = ref<'light' | 'dark'>(initial.theme);
   const sidebarCollapsed = ref(initial.sidebarCollapsed);
   const workbenchSplitView = ref<boolean>(initial.workbenchSplitView ?? false);
-  const agentMode = ref<AgentMode>(initial.agentMode ?? 'mining');
+  const agentMode = ref<AgentMode>(initial.agentMode ?? 'agent_sdk');
 
   function toggleTheme() { theme.value = theme.value === 'light' ? 'dark' : 'light'; }
   function toggleSidebar() { sidebarCollapsed.value = !sidebarCollapsed.value; }
