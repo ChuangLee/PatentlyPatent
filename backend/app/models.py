@@ -56,6 +56,8 @@ class FileNode(Base):
     parent_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
     source: Mapped[str] = mapped_column(String(16))          # 'user' | 'ai' | 'system'
     hidden: Mapped[bool] = mapped_column(Boolean, default=False)
+    # v0.37: 只读标志——"本系统文档" 根文件夹及其子项；前端 UI 禁用写操作 + 后端 API 拒改
+    readonly: Mapped[bool] = mapped_column(Boolean, default=False)
     mime: Mapped[str | None] = mapped_column(String(128), nullable=True)
     size: Mapped[int | None] = mapped_column(Integer, nullable=True)
     content: Mapped[str | None] = mapped_column(String, nullable=True)   # 内联文本（md/txt/json）

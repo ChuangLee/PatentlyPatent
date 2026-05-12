@@ -36,10 +36,28 @@ def list_files(pid: str, db: Session = Depends(get_db)):
     return [FileNodeOut.model_validate(f).model_dump(by_alias=True) for f in rows]
 
 
+def _is_readonly_ancestor(db: Session, pid: str, parent_id: str | None) -> bool:
+    """v0.37: 向上查 parent，命中任一 readonly=True 节点即视为只读子树。"""
+    seen: set[str] = set()
+    cur = parent_id
+    while cur and cur not in seen:
+        seen.add(cur)
+        node = db.get(FileNode, cur)
+        if node is None or node.project_id != pid:
+            return False
+        if node.readonly:
+            return True
+        cur = node.parent_id
+    return False
+
+
 @router.post("", response_model=dict, status_code=201)
 def create_file(pid: str, body: FileCreate, db: Session = Depends(get_db)):
     if not db.get(Project, pid):
         raise HTTPException(404, "project not found")
+    # v0.37: 拒绝在 readonly 树下创建
+    if _is_readonly_ancestor(db, pid, body.parentId):
+        raise HTTPException(403, "目标文件夹只读，不能新建文件")
     fid = f"f-{uuid.uuid4().hex[:10]}"
     f = FileNode(
         id=fid, project_id=pid,
@@ -60,6 +78,9 @@ def update_file(pid: str, fid: str, body: FileUpdate, db: Session = Depends(get_
     f = db.get(FileNode, fid)
     if not f or f.project_id != pid:
         raise HTTPException(404, "file not found")
+    # v0.37: readonly 节点或其祖先 readonly → 拒改
+    if f.readonly or _is_readonly_ancestor(db, pid, f.parent_id):
+        raise HTTPException(403, "该文件/文件夹只读，不能修改")
     if body.name is not None: f.name = body.name
     if body.parentId is not None: f.parent_id = body.parentId
     if body.content is not None:
@@ -77,6 +98,9 @@ def delete_file(pid: str, fid: str, db: Session = Depends(get_db)):
     f = db.get(FileNode, fid)
     if not f or f.project_id != pid:
         raise HTTPException(404, "file not found")
+    # v0.37: readonly 节点或其祖先 readonly → 拒删
+    if f.readonly or _is_readonly_ancestor(db, pid, f.parent_id):
+        raise HTTPException(403, "该文件/文件夹只读，不能删除")
     # 递归删
     to_del = [fid]
     while to_del:
@@ -114,6 +138,9 @@ async def upload_file(
         raise HTTPException(404, "project not found")
     if not file.filename:
         raise HTTPException(400, "filename required")
+    # v0.37: 拒绝上传到 readonly 子树
+    if _is_readonly_ancestor(db, pid, parentId):
+        raise HTTPException(403, "目标文件夹只读，不能上传")
 
     fid = f"f-{uuid.uuid4().hex[:10]}"
     target = _storage_path(pid, fid, file.filename)

@@ -39,7 +39,7 @@ export interface User {
 }
 
 // v0.18-C: 结构化消息类型，'text' 是默认（兼容历史数据）
-export type ChatMessageType = 'text' | 'tool_call' | 'thinking' | 'error';
+export type ChatMessageType = 'text' | 'tool_call' | 'thinking' | 'error' | 'step_done' | 'step_failed';
 
 export interface ChatMessage {
   id: string;
@@ -139,6 +139,7 @@ export interface FileNode {
   parentId: string | null;          // 根节点 null
   source: FileSource;
   hidden?: boolean;                 // .ai-internal/ 等隐藏文件夹默认 true
+  readonly?: boolean;               // v0.37: 只读标志（"本系统文档" 根及其子项）
   mime?: FileMime;
   size?: number;
   content?: string;                 // 内联文本内容（md/txt/json）

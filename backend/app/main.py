@@ -5,7 +5,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from .config import settings
+from .config import assert_claude_cli_available, settings
 from .db import init_db, session_scope
 from .fixtures import seed_users
 from .routes import auth as r_auth
@@ -29,8 +29,36 @@ async def lifespan(_: FastAPI):
     init_db()
     with session_scope() as db:
         seed_users(db)
-    log.info("startup ok | use_real_llm=%s | use_real_zhihuiya=%s",
-             settings.use_real_llm, settings.use_real_zhihuiya)
+    # v0.37: 给所有现存 project 回填"本系统文档"根（幂等）
+    try:
+        from .system_docs import backfill_all_projects
+        with session_scope() as db:
+            n = backfill_all_projects(db)
+            log.info("system_docs backfilled for %d projects", n)
+    except Exception as e:  # noqa: BLE001
+        log.warning("system_docs backfill failed: %s", e)
+    # v0.37: 启动时把所有 status=running 的 AgentRun 标 cancelled —— 这些 task 因
+    # systemd 重启已死掉，DB 状态没刷会让前端误以为还在跑，进项目即"思考中"卡死
+    try:
+        from datetime import datetime, timezone
+        from sqlalchemy import update
+        from .models import AgentRun
+        with session_scope() as db:
+            stale = db.query(AgentRun).filter(AgentRun.status == "running").all()
+            now = datetime.now(timezone.utc)
+            for r in stale:
+                r.status = "cancelled"
+                r.finished_at = now
+                r.error = "process restarted; marked cancelled at startup"
+            if stale:
+                log.warning("marked %d stale running AgentRun as cancelled (systemd restart)", len(stale))
+    except Exception as e:  # noqa: BLE001
+        log.warning("stale run cleanup failed: %s", e)
+    cli_path = assert_claude_cli_available()
+    log.info(
+        "startup ok | claude_cli=%s | use_real_zhihuiya=%s | model=%s",
+        cli_path, settings.use_real_zhihuiya, settings.anthropic_model,
+    )
     agent_sdk_spike.log_startup_status()
     yield
 
@@ -68,7 +96,7 @@ def ping():
         "ok": True,
         "service": "patentlypatent-backend",
         "version": "0.5.0",
-        "use_real_llm": settings.use_real_llm,
         "use_real_zhihuiya": settings.use_real_zhihuiya,
         "cas_enabled": settings.cas_enabled,
+        "model": settings.anthropic_model,
     }

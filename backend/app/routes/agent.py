@@ -25,6 +25,7 @@ from sse_starlette.sse import EventSourceResponse
 
 from ..agent_sdk_spike import agent_mine_stream
 from .. import agent_section_demo
+from ..agent_interview import interview_stream
 from ..agent_section_demo import mine_section_via_agent
 from ..budget import BudgetBlocked, ensure_not_blocked, update_after_run
 from ..concurrency import SSEBusy, acquire_sse_slot, release_sse_slot
@@ -36,6 +37,149 @@ from ..models import AgentEvent, AgentRun, AgentRunLog, FileNode, Project
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/agent", tags=["agent"])
+
+
+# ─── v0.36: interview agent —— 资深专利代理人对话式追问 ─────────────────────
+
+
+class InterviewMessage(BaseModel):
+    role: str  # 'user' | 'agent'
+    content: str
+
+
+class InterviewRequest(BaseModel):
+    user_msg: str | None = None
+    history: list[InterviewMessage] | None = None
+
+
+def _gather_interview_inputs(pid: str) -> dict:
+    """从 DB 读项目 + 已生成的 5 节 markdown + 上传文件清单。
+
+    sections 优先取 .ai-internal/_compare/full/<sect>.md（mineFull 落地），
+    缺则 fallback 到 AI 输出/01-xx.md（老 mining 路径）。
+    """
+    db = SessionLocal()
+    try:
+        p = db.get(Project, pid)
+        if not p:
+            return {}
+        all_files = (
+            db.query(FileNode)
+            .filter(FileNode.project_id == pid)
+            .all()
+        )
+        by_id = {f.id: f for f in all_files}
+        by_parent: dict[str | None, list[FileNode]] = {}
+        for f in all_files:
+            by_parent.setdefault(f.parent_id, []).append(f)
+
+        def _find_folder(parent_id: str | None, name: str) -> FileNode | None:
+            for f in by_parent.get(parent_id, []):
+                if f.kind == "folder" and f.name == name:
+                    return f
+            return None
+
+        # sections from mineFull hidden folder
+        sections: dict[str, str] = {}
+        internal = next(
+            (f for f in by_parent.get(None, []) if f.kind == "folder" and f.name == ".ai-internal"),
+            None,
+        )
+        if internal:
+            compare = _find_folder(internal.id, "_compare")
+            if compare:
+                full = _find_folder(compare.id, "full")
+                if full:
+                    for f in by_parent.get(full.id, []):
+                        if f.kind == "file" and f.content:
+                            sections[f.name] = f.content
+
+        # fallback: AI 输出/01-xx.md (legacy mining)
+        ai_root = next(
+            (f for f in by_parent.get(None, []) if f.kind == "folder" and f.name == "AI 输出"),
+            None,
+        )
+        if ai_root and not sections:
+            for f in by_parent.get(ai_root.id, []):
+                if f.kind == "file" and f.name.endswith(".md") and not f.name.startswith("_"):
+                    sections[f.name] = f.content or ""
+
+        # uploads under 我的资料/
+        uploads_root = next(
+            (f for f in by_parent.get(None, []) if f.kind == "folder" and f.name == "我的资料"),
+            None,
+        )
+        uploads: list[dict] = []
+        if uploads_root:
+            for f in by_parent.get(uploads_root.id, []):
+                if f.kind == "file":
+                    uploads.append({
+                        "name": f.name,
+                        "mime": f.mime or "?",
+                        "size": f.size or 0,
+                    })
+
+        domain = p.custom_domain or _DOMAIN_LABEL.get(p.domain or "", p.domain or "其他")
+        return {
+            "idea": p.description or "",
+            "title": p.title or "",
+            "domain": domain,
+            "sections": sections,
+            "uploads": uploads,
+        }
+    finally:
+        db.close()
+
+
+@router.post("/interview/{project_id}")
+async def interview(project_id: str, body: InterviewRequest):
+    """资深专利代理人对话式追问端点。
+
+    - 首轮（history 空）：基于初稿挑 ≤3 个最关键的事实/方向问题
+    - 后续轮（带 user_msg + history）：消化用户答 → 续问 ≤3 个 / 或宣告 [READY_FOR_DOCX]
+    """
+    try:
+        ensure_not_blocked()
+    except BudgetBlocked as exc:
+        raise HTTPException(503, f"今日预算已超限：${exc.daily_sum:.4f}")
+    try:
+        await acquire_sse_slot("interview")
+    except SSEBusy:
+        raise HTTPException(503, "服务繁忙，请稍候")
+
+    inputs = await asyncio.to_thread(_gather_interview_inputs, project_id)
+    if not inputs:
+        release_sse_slot("interview")
+        raise HTTPException(404, f"project {project_id} not found")
+
+    # 把当轮 user_msg 拼到 history 末尾
+    history = [m.model_dump() for m in (body.history or [])]
+    if body.user_msg:
+        history.append({"role": "user", "content": body.user_msg})
+
+    async def gen():
+        try:
+            async for ev in interview_stream(
+                idea=inputs["idea"],
+                title=inputs["title"],
+                domain=inputs["domain"],
+                sections=inputs["sections"],
+                uploads=inputs["uploads"],
+                history=history,
+                project_id=project_id,   # v0.36.4: 让 save_research/read_user_file/file_write_section 拿得到 pid
+            ):
+                yield {
+                    "event": ev.get("type", "message"),
+                    "data": json.dumps(ev, ensure_ascii=False),
+                }
+        finally:
+            release_sse_slot("interview")
+            try:
+                await asyncio.to_thread(update_after_run, "interview")
+            except Exception:  # noqa: BLE001
+                pass
+
+    return EventSourceResponse(gen())
 
 
 class MineSpikeRequest(BaseModel):
@@ -289,7 +433,7 @@ async def ab_compare(
                     stop_reason=(_stop_reason or None) and str(_stop_reason)[:32],
                     fallback_used=False,
                     error=(agent_error or None) and str(agent_error)[:2000],
-                    is_mock=not settings.use_agent_sdk_real,
+                    is_mock=False,
                 ))
                 _ab_log_db.commit()
             except Exception:
@@ -572,7 +716,7 @@ async def mine_full(
                     stop_reason="completed" if not last_error else "error",
                     fallback_used=False,
                     error=last_error,
-                    is_mock=not settings.use_agent_sdk_real,
+                    is_mock=False,
                 )
                 # v0.21: 预算告警（写完 log 立即对账）
                 await asyncio.to_thread(update_after_run, "mine_full")
@@ -819,7 +963,7 @@ async def _run_mining_in_background(
                 stop_reason=final_status,
                 fallback_used=False,
                 error=last_error,
-                is_mock=not settings.use_agent_sdk_real,
+                is_mock=False,
             )
             await asyncio.to_thread(update_after_run, endpoint)
         except Exception as _exc:  # noqa: BLE001

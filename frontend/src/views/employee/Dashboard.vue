@@ -4,6 +4,8 @@ import { useRouter, useRoute } from 'vue-router';
 import { projectsApi } from '@/api/projects';
 import { useAuthStore } from '@/stores/auth';
 import NewProjectModal from '@/components/workbench/NewProjectModal.vue';
+import AModal from 'ant-design-vue/es/modal';
+import message from 'ant-design-vue/es/message';
 import type { Project, ProjectStatus } from '@/types';
 
 const router = useRouter();
@@ -78,6 +80,72 @@ const stats = computed(() => {
 function go(p: Project) {
   router.push(`/employee/projects/${p.id}/workbench`);
 }
+
+// v0.37: 多选 + 批量删除
+const selectMode = ref(false);
+const selected = ref<Set<string>>(new Set());
+function toggleSelectMode() {
+  selectMode.value = !selectMode.value;
+  if (!selectMode.value) selected.value = new Set();
+}
+function toggleSelect(p: Project, ev: MouseEvent) {
+  ev.stopPropagation();
+  const s = new Set(selected.value);
+  if (s.has(p.id)) s.delete(p.id); else s.add(p.id);
+  selected.value = s;
+}
+function selectAll() {
+  selected.value = new Set(filteredProjects.value.map(p => p.id));
+}
+function clearSelection() { selected.value = new Set(); }
+async function deleteSelected() {
+  const ids = [...selected.value];
+  if (ids.length === 0) {
+    message.warning('请先勾选要删除的项目');
+    return;
+  }
+  AModal.confirm({
+    title: `确认删除 ${ids.length} 个项目？`,
+    content: '项目及其文件树、对话历史、AI 输出都会删除，无法恢复。',
+    okText: '删除', okType: 'danger', cancelText: '取消',
+    async onOk() {
+      let ok = 0, fail = 0;
+      for (const id of ids) {
+        try { await projectsApi.remove(id); ok++; }
+        catch (e: any) { fail++; console.warn('delete', id, e?.message); }
+      }
+      message.success(`已删除 ${ok}${fail ? `，失败 ${fail}` : ''}`);
+      selected.value = new Set();
+      selectMode.value = false;
+      refresh();
+    },
+  });
+}
+
+// v0.37: 单卡 ⋯ 菜单
+async function archiveProject(p: Project, ev?: Event) {
+  ev?.stopPropagation();
+  try {
+    await projectsApi.update(p.id, { archived: !p.archived });
+    message.success(p.archived ? '已取消归档' : '已归档');
+    refresh();
+  } catch (e: any) { message.error('操作失败：' + (e?.message || e)); }
+}
+function deleteOne(p: Project, ev?: Event) {
+  ev?.stopPropagation();
+  AModal.confirm({
+    title: `确认删除项目 "${p.title}"？`,
+    content: '项目及其文件树、对话历史、AI 输出都会删除，无法恢复。',
+    okText: '删除', okType: 'danger', cancelText: '取消',
+    async onOk() {
+      try {
+        await projectsApi.remove(p.id);
+        message.success('已删除');
+        refresh();
+      } catch (e: any) { message.error('删除失败：' + (e?.message || e)); }
+    },
+  });
+}
 </script>
 
 <template>
@@ -134,7 +202,19 @@ function go(p: Project) {
     <!-- 项目区 header -->
     <div class="pp-dash__list-head">
       <h2 class="pp-dash__list-title">我的创新项目</h2>
-      <a-segmented v-model:value="archivedFilter" :options="['活跃', '已归档']" />
+      <div class="pp-dash__list-actions">
+        <template v-if="selectMode">
+          <span class="pp-dash__sel-count">已选 {{ selected.size }} / {{ filteredProjects.length }}</span>
+          <a-button size="small" @click="selectAll" :disabled="selected.size === filteredProjects.length">全选</a-button>
+          <a-button size="small" @click="clearSelection" :disabled="selected.size === 0">清空</a-button>
+          <a-button size="small" danger :disabled="selected.size === 0" @click="deleteSelected">🗑 删除选中</a-button>
+          <a-button size="small" @click="toggleSelectMode">取消</a-button>
+        </template>
+        <template v-else>
+          <a-button size="small" @click="toggleSelectMode">☐ 多选</a-button>
+          <a-segmented v-model:value="archivedFilter" :options="['活跃', '已归档']" />
+        </template>
+      </div>
     </div>
 
     <a-spin :spinning="loading">
@@ -150,14 +230,32 @@ function go(p: Project) {
           v-for="p in filteredProjects"
           :key="p.id"
           class="pp-pcard pp-card pp-card-hoverable"
-          :class="{ 'pp-pcard--archived': p.archived }"
-          @click="go(p)"
+          :class="{ 'pp-pcard--archived': p.archived, 'pp-pcard--selected': selected.has(p.id) }"
+          @click="selectMode ? toggleSelect(p, $event) : go(p)"
         >
           <header class="pp-pcard__head">
+            <input v-if="selectMode" type="checkbox"
+                   class="pp-pcard__check"
+                   :checked="selected.has(p.id)"
+                   @click.stop="toggleSelect(p, $event)"
+                   @change="(e) => e.stopPropagation()" />
             <h3 class="pp-pcard__title">{{ p.title }}</h3>
             <a-tag :color="STATUS_LABEL[p.status].color" class="pp-pcard__tag">
               {{ STATUS_LABEL[p.status].text }}
             </a-tag>
+            <a-dropdown v-if="!selectMode" :trigger="['click']">
+              <a class="pp-pcard__more" @click.stop.prevent>⋯</a>
+              <template #overlay>
+                <a-menu>
+                  <a-menu-item key="archive" @click="(arg: any) => archiveProject(p, arg.domEvent)">
+                    {{ p.archived ? '取消归档' : '归档' }}
+                  </a-menu-item>
+                  <a-menu-item key="delete" danger @click="(arg: any) => deleteOne(p, arg.domEvent)">
+                    删除
+                  </a-menu-item>
+                </a-menu>
+              </template>
+            </a-dropdown>
           </header>
 
           <div class="pp-pcard__progress">
@@ -329,6 +427,44 @@ function go(p: Project) {
   justify-content: space-between;
   align-items: flex-start;
   gap: var(--pp-space-3);
+}
+/* v0.37: 卡片右上 ⋯ 操作菜单 */
+.pp-pcard__more {
+  flex: none;
+  width: 22px;
+  height: 22px;
+  border-radius: 4px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--pp-color-text-tertiary);
+  font-size: 18px;
+  line-height: 1;
+  cursor: pointer;
+  user-select: none;
+}
+.pp-pcard__more:hover {
+  background: var(--pp-color-bg-elevated);
+  color: var(--pp-color-text);
+}
+.pp-pcard__check {
+  margin-top: 4px;
+  width: 16px;
+  height: 16px;
+  cursor: pointer;
+}
+.pp-pcard--selected {
+  outline: 2px solid var(--pp-color-primary);
+  outline-offset: -1px;
+}
+.pp-dash__list-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+.pp-dash__sel-count {
+  font-size: 12px;
+  color: var(--pp-color-text-secondary);
 }
 .pp-pcard__title {
   margin: 0;

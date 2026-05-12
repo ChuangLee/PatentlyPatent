@@ -26,6 +26,7 @@ apiClient.interceptors.request.use(cfg => {
 });
 
 // v0.21：401 → 清 token + 跳 /login（除登录接口本身）
+// v0.36.6: 用 vite 的 BASE_URL（prod=/patent/, dev=/）拼登录路径，避免 prod 跳到错的根 /login
 apiClient.interceptors.response.use(
   r => r,
   err => {
@@ -36,8 +37,12 @@ apiClient.interceptors.response.use(
         localStorage.removeItem(TOKEN_KEY);
         localStorage.removeItem('pp.auth.user');
       } catch { /* noop */ }
-      if (typeof window !== 'undefined' && !window.location.pathname.endsWith('/login')) {
-        window.location.href = '/login';
+      if (typeof window !== 'undefined') {
+        const base = (import.meta.env.BASE_URL || '/').replace(/\/$/, '');
+        const target = `${base}/login`;
+        if (!window.location.pathname.endsWith('/login')) {
+          window.location.href = target;
+        }
       }
     }
     console.error('[api]', err.message);

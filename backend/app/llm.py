@@ -1,7 +1,10 @@
-"""LLM 客户端：Anthropic SDK 流式 + mock fallback"""
+"""LLM 客户端：统一走 claude-agent-sdk → claude CLI 子进程（OAuth）。
+
+所有 LLM 调用走同一条路径，凭证用 `~/.claude/.credentials.json`。
+不再依赖 ANTHROPIC_API_KEY，不再有 mock fallback —— CLI 不可用直接抛错。
+"""
 from __future__ import annotations
-import asyncio
-import random
+
 from typing import AsyncIterator
 
 from .config import settings
@@ -13,40 +16,32 @@ async def stream_chat(
     system: str = "你是企业内部的专利挖掘助手，回答简洁、专业。",
     model: str | None = None,
 ) -> AsyncIterator[str]:
-    """流式产出文本片段（chunks）。"""
-    model = model or settings.anthropic_model
-    if not settings.use_real_llm:
-        async for c in _mock_stream(user_msg):
-            yield c
-        return
-    try:
-        from anthropic import AsyncAnthropic
-        client = AsyncAnthropic(api_key=settings.anthropic_api_key)
-        async with client.messages.stream(
-            model=model,
-            max_tokens=2048,
-            system=system,
-            messages=[{"role": "user", "content": user_msg}],
-        ) as s:
-            async for text in s.text_stream:
-                yield text
-    except Exception as e:
-        yield f"\n[LLM 调用失败：{type(e).__name__}: {e}；已 fallback 到 mock 输出]\n"
-        async for c in _mock_stream(user_msg):
-            yield c
-
-
-async def _mock_stream(user_msg: str) -> AsyncIterator[str]:
-    """无 key / 无网时的占位流。"""
-    text = (
-        "（mock 模式）我看到了你的输入。\n\n"
-        f"摘要：{user_msg[:80]}{'…' if len(user_msg) > 80 else ''}\n\n"
-        "由于当前后端未配置 Anthropic API key 或开启了 PP_MOCK_LLM=1，"
-        "返回的是占位文本。设置环境变量 ANTHROPIC_API_KEY 后即可切到真 LLM。\n"
+    """流式产出文本片段（chunks）。失败直接抛异常。"""
+    from claude_agent_sdk import (
+        AssistantMessage,
+        ClaudeAgentOptions,
+        TextBlock,
+        query,
     )
-    for i in range(0, len(text), 3):
-        yield text[i : i + 3]
-        await asyncio.sleep(random.uniform(0.02, 0.05))
+
+    # 关键：tools=[] 禁用所有内置工具（allowed_tools 不是禁用，是免授权清单）；
+    # max_turns=5 给一点余量。无工具的纯对话模型不应该需要多轮。
+    options = ClaudeAgentOptions(
+        system_prompt=system,
+        model=model or settings.anthropic_model,
+        tools=[],
+        max_turns=5,
+    )
+
+    try:
+        async for msg in query(prompt=user_msg, options=options):
+            if isinstance(msg, AssistantMessage):
+                for block in msg.content:
+                    if isinstance(block, TextBlock):
+                        yield block.text
+    except Exception as e:  # noqa: BLE001
+        # 不让 SDK 异常炸 SSE 流；把错误吐给上层当一段普通文本，再让 caller 正常 done
+        yield f"\n\n[抱歉，调用 LLM 失败：{type(e).__name__}: {e}]"
 
 
 def split_grapheme(text: str, size: int = 3) -> list[str]:

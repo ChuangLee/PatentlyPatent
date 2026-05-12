@@ -9,11 +9,9 @@
 """
 from __future__ import annotations
 
-import asyncio
 import logging
 from typing import Any, AsyncIterator
 
-from .config import settings
 from . import zhihuiya
 
 logger = logging.getLogger(__name__)
@@ -175,9 +173,9 @@ async def _stream_real_sdk(
         query,
         ClaudeAgentOptions,
         AssistantMessage,
-        TextBlock,
-        ToolUseBlock,
         ResultMessage,
+        StreamEvent,
+        ToolUseBlock,
         UserMessage,
     )
 
@@ -188,47 +186,78 @@ async def _stream_real_sdk(
         mcp_servers={"patent-section-tools": server},
         allowed_tools=allowed,
         max_turns=max_turns,
+        include_partial_messages=True,   # v0.36.3: token 级流
     )
 
     yield {"type": "thinking", "text": f"agent 启动: section={section}"}
+    seen_tool_use_ids: set[str] = set()
 
     async for msg in query(prompt=idea_text, options=options):
-        if isinstance(msg, AssistantMessage):
+        if isinstance(msg, StreamEvent):
+            ev = msg.event or {}
+            if ev.get("type") == "content_block_delta":
+                delta = ev.get("delta") or {}
+                if delta.get("type") == "text_delta":
+                    text = delta.get("text", "")
+                    if text:
+                        yield {"type": "delta", "text": text}
+            elif ev.get("type") == "content_block_start":
+                cb = ev.get("content_block") or {}
+                if cb.get("type") == "thinking":
+                    yield {"type": "thinking", "text": "🤔 正在推理…"}
+            # 其它 SDK 内部事件不透传
+        elif isinstance(msg, AssistantMessage):
             for block in msg.content:
-                if isinstance(block, TextBlock):
-                    yield {"type": "delta", "text": block.text}
-                elif isinstance(block, ToolUseBlock):
+                if isinstance(block, ToolUseBlock):
+                    bid = getattr(block, "id", "") or f"auto-{len(seen_tool_use_ids)}"
+                    if bid in seen_tool_use_ids:
+                        continue
+                    seen_tool_use_ids.add(bid)
                     yield {
                         "type": "tool_use",
                         "name": getattr(block, "name", "?"),
                         "input": getattr(block, "input", {}) or {},
-                        "id": getattr(block, "id", ""),
+                        "id": bid,
                     }
         elif isinstance(msg, UserMessage):
             content = getattr(msg, "content", None)
             if isinstance(content, list):
                 for blk in content:
-                    blk_type = getattr(blk, "type", None) or (
-                        blk.get("type") if isinstance(blk, dict) else None
+                    # v0.36.4: partial 模式 ToolResultBlock 兼容
+                    is_tool_result = (
+                        type(blk).__name__ == "ToolResultBlock"
+                        or hasattr(blk, "tool_use_id")
+                        or (isinstance(blk, dict) and blk.get("type") == "tool_result")
                     )
-                    if blk_type == "tool_result":
-                        raw = (
-                            getattr(blk, "content", None)
-                            if not isinstance(blk, dict)
-                            else blk.get("content")
-                        )
-                        text = ""
-                        if isinstance(raw, str):
-                            text = raw
-                        elif isinstance(raw, list):
-                            parts = []
-                            for sub in raw:
-                                if isinstance(sub, dict) and sub.get("type") == "text":
-                                    parts.append(sub.get("text", ""))
-                                else:
-                                    parts.append(str(sub))
-                            text = "\n".join(parts)
-                        yield {"type": "tool_result", "text": text}
+                    if not is_tool_result:
+                        continue
+                    raw = (
+                        getattr(blk, "content", None)
+                        if not isinstance(blk, dict)
+                        else blk.get("content")
+                    )
+                    is_err = bool(getattr(blk, "is_error", False)) if not isinstance(blk, dict) else bool(blk.get("is_error"))
+                    tool_use_id = (
+                        getattr(blk, "tool_use_id", None) if not isinstance(blk, dict)
+                        else blk.get("tool_use_id")
+                    )
+                    text = ""
+                    if isinstance(raw, str):
+                        text = raw
+                    elif isinstance(raw, list):
+                        parts = []
+                        for sub in raw:
+                            if isinstance(sub, dict) and sub.get("type") == "text":
+                                parts.append(sub.get("text", ""))
+                            else:
+                                parts.append(str(sub))
+                        text = "\n".join(parts)
+                    ev = {"type": "tool_result", "text": text}
+                    if tool_use_id:
+                        ev["tool_use_id"] = tool_use_id
+                    if is_err:
+                        ev["is_error"] = True
+                    yield ev
         elif isinstance(msg, ResultMessage):
             yield {
                 "type": "done",
@@ -239,105 +268,6 @@ async def _stream_real_sdk(
             return
 
     yield {"type": "done", "stop_reason": "end_of_stream"}
-
-
-# ─── Mock 路径（核心：演示 LLM 自驱多 tool 调用的事件流形态）──────────────────
-
-async def _stream_mock_prior_art(
-    idea_text: str, context: dict
-) -> AsyncIterator[dict]:
-    """模拟 agent 自主调 2 个 tool 后产出完整背景技术 markdown。"""
-    title = context.get("title") or "未命名项目"
-    domain = context.get("domain") or "通用"
-
-    yield {"type": "thinking", "text": f"准备为「{title}」生成背景技术，先抽关键词…"}
-    await asyncio.sleep(0.03)
-
-    keyword = "区块链 AND 供应链" if "区块链" in idea_text else (idea_text[:20] or "通用方向")
-    q1 = f"TAC: ({keyword})"
-
-    # —— 第 1 次工具：search_patents
-    yield {
-        "type": "tool_use",
-        "name": "search_patents",
-        "input": {"query": q1},
-        "id": "mock-1",
-    }
-    await asyncio.sleep(0.03)
-    try:
-        c1 = (
-            await zhihuiya.query_search_count(q1)
-            if settings.use_real_zhihuiya
-            else 8421
-        )
-    except Exception:  # noqa: BLE001
-        c1 = 8421
-    yield {"type": "tool_result", "text": f'检索式 "{q1}" 命中 {c1} 件'}
-    await asyncio.sleep(0.03)
-
-    # —— 第 2 次工具：applicant_ranking（agent 看到红海后决定补查 top 申请人）
-    yield {
-        "type": "tool_use",
-        "name": "applicant_ranking",
-        "input": {"query": q1, "n": 5},
-        "id": "mock-2",
-    }
-    await asyncio.sleep(0.03)
-    yield {
-        "type": "tool_result",
-        "text": (
-            "top 申请人：[{'name':'IBM','count':312},"
-            "{'name':'阿里巴巴','count':278},"
-            "{'name':'腾讯','count':201}]"
-        ),
-    }
-    await asyncio.sleep(0.03)
-
-    # —— LLM 综合产出最终 markdown
-    final_md = f"""# 一、背景技术
-
-## 1.1 技术领域定位
-- **本案领域**：{domain}
-- **细分赛道**：{title}（基于用户描述判定）
-- **典型应用场景**：
-  - 跨企业供应链溯源
-  - 食品/药品冷链合规
-  - 跨境贸易单据存证
-
-## 1.2 报门描述原文
-> {(idea_text or '（未填写）').strip()}
-
-## 1.3 最相近的现有技术（基于智慧芽实时检索）
-- 检索式 `{q1}` 命中 **{c1}** 件，赛道处于活跃期。
-- 头部申请人：IBM（312 件）、阿里巴巴（278 件）、腾讯（201 件）。
-- 候选对照专利由命中集排序后人工筛选 3-5 篇填入下表：
-
-| # | 标题 / 出处 | 公开年 | 核心手段 | 与本案差距 |
-|---|---|---|---|---|
-| A | （由代理人在命中集中筛选） | — | — | — |
-| B | — | — | — | — |
-| C | — | — | — | — |
-
-## 1.4 演进脉络
-早期方案多依赖中心化数据库做溯源；主流方案转向联盟链 + 智能合约；当前 SOTA
-向跨链零知识压缩演进。本案在【SOTA 之后/之外】进一步优化吞吐与隐私。
-
-（mock 模式：两次工具调用被串成一段决策链；真实 SDK 下 LLM 会根据中间结果改写检索式）
-"""
-
-    # 切片成 delta 流，模拟流式出文
-    for i in range(0, len(final_md), 80):
-        yield {"type": "delta", "text": final_md[i : i + 80]}
-        await asyncio.sleep(0.02)
-
-    yield {
-        "type": "done",
-        "stop_reason": "mock_complete",
-        "mock": True,
-        "tool_calls": 2,
-        "num_turns": 3,
-        "total_cost_usd": 0.0,
-    }
 
 
 # ─── 对外入口 ───────────────────────────────────────────────────────────────
@@ -365,17 +295,9 @@ async def mine_section_via_agent(
         }
         return
 
-    if not settings.use_real_llm:
-        # 目前 mock 仅实现 prior_art，其余 section 直接复用同一份（演示用）
-        async for ev in _stream_mock_prior_art(idea_text, context):
-            yield ev
-        return
-
     try:
         async for ev in _stream_real_sdk(section, idea_text, max_turns):
             yield ev
     except Exception as exc:  # noqa: BLE001
         logger.exception("agent_section real path failed")
-        yield {"type": "error", "message": f"SDK 失败，降级 mock：{exc}"}
-        async for ev in _stream_mock_prior_art(idea_text, context):
-            yield ev
+        yield {"type": "error", "message": f"{type(exc).__name__}: {exc}"}

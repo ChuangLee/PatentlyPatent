@@ -47,6 +47,7 @@ class FileNodeOut(_CamelModel):
     parent_id: Optional[str] = None
     source: FILE_SOURCE
     hidden: bool = False
+    readonly: bool = False  # v0.37: 不可编辑标志（系统文档根及其子项）
     mime: Optional[str] = None
     size: Optional[int] = None
     content: Optional[str] = None

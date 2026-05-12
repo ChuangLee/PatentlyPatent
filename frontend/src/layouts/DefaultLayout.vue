@@ -9,7 +9,6 @@ import { useUIStore } from '@/stores/ui';
 import { projectsApi } from '@/api/projects';
 import RoleBadge from '@/components/common/RoleBadge.vue';
 import FileTree from '@/components/workbench/FileTree.vue';
-import UsageTutorial from '@/components/tutorial/UsageTutorial.vue';
 import type { Project, ProjectStatus } from '@/types';
 
 const router = useRouter();
@@ -210,19 +209,7 @@ const avatarLetter = computed(() => {
 
 const userDept = computed(() => auth.user?.department || '');
 
-// 装饰性搜索框（暂不接逻辑）
-const searchValue = ref('');
-
-const APP_VERSION = 'v0.26';
-
-// v0.26：使用教程 modal
-const tutorialOpen = ref(false);
-function openTutorial() { tutorialOpen.value = true; }
-function closeTutorial() { tutorialOpen.value = false; }
-function tutorialStartNow() {
-  tutorialOpen.value = false;
-  router.push('/employee/dashboard?new=1');
-}
+const APP_VERSION = 'v0.37';
 </script>
 
 <template>
@@ -253,24 +240,15 @@ function tutorialStartNow() {
         </button>
       </div>
 
-      <!-- 用户卡片 -->
-      <div v-if="!ui.sidebarCollapsed && auth.user" class="pp-sider__user">
-        <div class="pp-sider__avatar">{{ avatarLetter }}</div>
-        <div class="pp-sider__user-meta">
-          <div class="pp-sider__user-name">{{ auth.user.name }}</div>
-          <div class="pp-sider__user-sub">
-            {{ auth.role === 'admin' ? '管理员' : '员工' }}
-            <span v-if="userDept">· {{ userDept }}</span>
-          </div>
-        </div>
-      </div>
-
       <!-- 员工 sidebar -->
       <div v-if="auth.role === 'employee'" class="pp-sider__body">
         <div class="pp-sec">
-          <div class="pp-sec-head">
+          <div class="pp-sec-head pp-sec-head-with-action">
             <span>我的项目</span>
-            <a-button type="link" size="small" class="pp-sec-link" @click="goAllProjects">全部 →</a-button>
+            <span class="pp-sec-head-actions">
+              <a-button type="primary" size="small" @click="newProject">✨ 新建</a-button>
+              <a-button type="link" size="small" class="pp-sec-link" @click="goAllProjects">全部 →</a-button>
+            </span>
           </div>
           <a-spin :spinning="loadingProjects" size="small">
             <div v-if="!loadingProjects && myProjects.length === 0" class="pp-empty">还没有项目</div>
@@ -327,24 +305,11 @@ function tutorialStartNow() {
               </a-dropdown>
             </div>
           </a-spin>
-          <a-button
-            type="primary"
-            block
-            size="small"
-            class="pp-newproj-btn"
-            @click="newProject"
-          >
-            ✨ 新建报门
-          </a-button>
         </div>
 
         <div class="pp-sec-divider" />
 
-        <div class="pp-sec pp-sec-grow">
-          <div class="pp-sec-head">
-            <span>📁 项目文件</span>
-            <span v-if="!currentProjectId" class="pp-sec-tip">未选项目</span>
-          </div>
+        <div class="pp-sec pp-sec-grow pp-sec-files">
           <div v-if="!currentProjectId" class="pp-empty">在上方选一个项目以查看文件</div>
           <FileTree v-else :project-id="currentProjectId" />
         </div>
@@ -399,36 +364,12 @@ function tutorialStartNow() {
         </div>
 
         <div class="pp-header__right">
-          <div class="pp-header__search">
-            <span class="pp-header__search-icon">🔍</span>
-            <input
-              v-model="searchValue"
-              class="pp-header__search-input"
-              placeholder="搜项目 / 知识 / 命令..."
-            />
-            <span class="pp-header__search-kbd">⌘K</span>
-          </div>
-
-          <button
-            class="pp-header__tutorial-btn"
-            title="使用教程"
-            data-testid="tutorial-btn"
-            @click="openTutorial"
-          >
-            📖 使用教程
-          </button>
-
           <button
             class="pp-header__icon-btn"
             :title="ui.theme === 'dark' ? '切换到浅色模式' : '切换到深色模式'"
             @click="ui.toggleTheme()"
           >
             {{ ui.theme === 'dark' ? '☀️' : '🌙' }}
-          </button>
-
-          <button class="pp-header__icon-btn" title="通知">
-            🔔
-            <span class="pp-header__badge" />
           </button>
 
           <div class="pp-header__user">
@@ -448,28 +389,21 @@ function tutorialStartNow() {
       </a-layout-content>
     </a-layout>
 
-    <!-- v0.26：使用教程 modal -->
-    <a-modal
-      :open="tutorialOpen"
-      :width="1200"
-      :style="{ top: '40px' }"
-      :footer="null"
-      :body-style="{ padding: 0, maxHeight: '78vh', overflowY: 'auto' }"
-      :destroy-on-close="true"
-      wrap-class-name="pp-tutorial-modal"
-      title="📖 PatentlyPatent 使用教程"
-      @cancel="closeTutorial"
-      @update:open="(v: boolean) => (tutorialOpen = v)"
-    >
-      <UsageTutorial @start="tutorialStartNow" @skip="closeTutorial" />
-    </a-modal>
   </a-layout>
 </template>
 
 <style scoped>
 .pp-shell {
-  min-height: 100vh;
+  /* v0.37: 死高度 viewport，子区独立滚（sidebar / content / chat 各自滚自己） */
+  height: 100vh;
+  overflow: hidden;
   background: var(--pp-color-bg);
+}
+.pp-main {
+  height: 100vh;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
 }
 
 /* ================= Sidebar ================= */
@@ -611,6 +545,7 @@ function tutorialStartNow() {
   text-transform: uppercase;
 }
 .pp-sec-link { padding: 0; height: auto; font-size: 11px; }
+.pp-sec-head-actions { display: inline-flex; align-items: center; gap: 4px; }
 .pp-sec-tip { color: var(--pp-color-text-tertiary); font-size: 11px; }
 .pp-sec-divider {
   height: 1px;
@@ -742,7 +677,6 @@ function tutorialStartNow() {
 }
 
 /* ================= Header ================= */
-.pp-main { background: var(--pp-color-bg); }
 .pp-header {
   height: var(--pp-header-h, 56px);
   line-height: normal;
@@ -960,11 +894,13 @@ function tutorialStartNow() {
 
 /* ================= Content ================= */
 .pp-content {
-  margin: var(--pp-space-5);
-  padding: var(--pp-space-5) var(--pp-space-6);
+  margin: 8px;
+  padding: 0;
   background: transparent;
   border-radius: 0;
-  min-height: calc(100vh - var(--pp-header-h, 56px) - 40px);
+  min-height: 0;
+  flex: 1;            /* 满父 (pp-main) 剩余高度 */
+  overflow: hidden;   /* 内部 chat grid 自己滚 */
 }
 
 /* ================= 响应式 ================= */

@@ -1,9 +1,10 @@
 <script setup lang="ts">
 /**
- * 项目工作台 — 三栏布局
- * 左：文件树 | 中：通用 AI 聊天 | 右：文件预览
+ * 项目工作台
+ * v0.36: 左 sidebar 含文件树 | 中 chat 满宽 | 右文件预览改 Drawer 浮层（全屏/钉住/关闭）
+ *   ui.previewMode: closed | drawer(default 50%) | fullscreen(100%) | pinned(回 480px 固定栏)
  */
-import { onMounted, ref, computed } from 'vue';
+import { onMounted, ref, computed, watch } from 'vue';
 import { useRoute } from 'vue-router';
 import { projectsApi } from '@/api/projects';
 import { chatApi } from '@/api/chat';
@@ -32,8 +33,52 @@ const chatRef = ref<InstanceType<typeof AgentChatStream> | null>(null);
 const generating = ref(false);
 // v0.21 任务 1: 一键全程挖掘 loading
 const fullMining = ref(false);
+// v0.37: 重新挖掘按钮 loading
+const restartMining = ref(false);
 
 const isReadonly = computed(() => auth.role === 'admin');
+
+/** v0.37: 是否已有挖掘历史（用于决定按钮显示"开始"还是"重新"） */
+const hasMiningHistory = computed(() =>
+  chat.messages.some(m => m.role === 'user' || m.role === 'agent' && (m.content || '').trim()),
+);
+
+/** v0.37: 用户手动点"开始挖掘"才启动 interview（不再 onMounted 自动跑） */
+async function startMining() {
+  if (!chatRef.value || chat.streaming) return;
+  await chatRef.value.startFirstInterview();
+}
+
+/** v0.37: 强制重置当前项目状态 → 重新启动 interview-first（卡住时救命按钮） */
+async function restartFromScratch() {
+  if (!project.value || !chatRef.value || restartMining.value) return;
+  restartMining.value = true;
+  try {
+    // 1) 取消任何在跑的 detached run
+    const rid = chat.currentRunId;
+    if (rid) {
+      try { await chatApi.agentRuns.cancel(rid); } catch { /* ignore */ }
+      chat.setCurrentRun(null);
+    }
+    // 2) 强制结束 streaming + 清 plan/ready 状态 + 清空消息
+    chat.endAgent();
+    chat.clearPlan();
+    chat.setInterviewActive(false);
+    chat.setReadyForDocx(false);
+    chat.reset();
+    // 3) 重启 interview 首轮
+    await chatRef.value.startFirstInterview();
+  } catch (e: any) {
+    message.error('重启失败：' + (e?.message || e));
+  } finally {
+    restartMining.value = false;
+  }
+}
+
+// v0.36: 选中文件 → 自动 open Drawer（如果当前是 closed），不打扰已 fullscreen / pinned
+watch(() => files.currentFileId, (id) => {
+  if (id && ui.previewMode === 'closed') ui.openPreview();
+});
 
 /** v0.21 任务 1: 触发 mine_full 一键端到端 */
 async function runFullMining() {
@@ -153,7 +198,8 @@ onMounted(async () => {
   files.attach(id, project.value?.fileTree);
 
   // v0.35.4: 报门时入队的二进制 attachment 在此异步上传 + 进度推到 chat
-  void uploadPendingAttachments(id);
+  // v0.36.7: 不再 fire-and-forget；保留 promise 给下面 mineFull 等附件传完再启动
+  const uploadPromise = uploadPendingAttachments(id);
 
   if (!restored && project.value?.miningSummary?.conversation.length) {
     // 首次进入：用后端 miningSummary 预填，attach 内部会 persist
@@ -213,44 +259,36 @@ onMounted(async () => {
     }
   }
 
-  // v0.33 + v0.34.3: 没接管运行中 run + 没历史回放 → 自动启动挖掘
-  // 关键：不限制 status='drafting'（auto-mining 后台会改成 researching）
-  // 关键：用 hasMeaningfulContent 而不是 length===0（attach 已清掉空 agent 残留）
-  const hasMeaningfulContent = chat.messages.some(
-    m => m.role === 'user' || (m.content && m.content.trim().length > 0),
-  );
-  const isFreshDraft = !resumed
-    && !hasMeaningfulContent
-    && project.value
-    && project.value.status !== 'completed'
-    && !isReadonly.value;
-  if (isFreshDraft) {
-    // 给一点时间让 chat 组件挂载完成
-    setTimeout(() => {
+  // v0.37: 不再自动启动挖掘。空项目时前端显示"开始挖掘"按钮让用户主动点
+  // 仅在已经有 detached run 在跑时才接管恢复（上面已处理）
+  // 老 mining 模式 (agent_sdk=false) 保留旧自动 autoMine 行为
+  if (!resumed && project.value && project.value.status !== 'completed' && !isReadonly.value) {
+    // 仅 mining 模式自动；agent_sdk 模式由用户手动点按钮
+    (async () => {
+      try { await uploadPromise; } catch (e: any) {
+        console.warn('[upload wait]', e?.message || e);
+      }
+      await new Promise(r => setTimeout(r, 100));
       if (!chatRef.value || chat.streaming) return;
-      const idea = [
-        project.value!.title,
-        project.value!.description,
-        project.value!.intake?.notes,
-      ].filter(Boolean).join('\n');
-      // agent_sdk 模式优先 mineFull，老 mining 模式走 autoMine
-      const ctx = {
-        title: project.value!.title,
-        domain: project.value!.domain,
-        customDomain: project.value!.customDomain,
-        description: project.value!.description,
-        intake: project.value!.intake,
-      };
+      const hasUserMsg = chat.messages.some(m => m.role === 'user');
       if (ui.agentMode === 'agent_sdk') {
-        chatRef.value.mineFull(idea || '（无描述）').catch((e: any) => {
-          console.warn('[auto mineFull on enter] failed:', e?.message || e);
-        });
-      } else {
+        // agent_sdk: 等用户点"开始挖掘"按钮，这里啥都不做
+        return;
+      }
+      if (hasUserMsg) return;   // 老 mining 模式：有用户消息说明已挖过，不重跑
+      {
+        const ctx = {
+          title: project.value!.title,
+          domain: project.value!.domain,
+          customDomain: project.value!.customDomain,
+          description: project.value!.description,
+          intake: project.value!.intake,
+        };
         chatRef.value.autoMine(ctx).catch((e: any) => {
           console.warn('[auto autoMine on enter] failed:', e?.message || e);
         });
       }
-    }, 300);
+    })();
   }
 });
 
@@ -262,66 +300,30 @@ function onRoundComplete() {
 <template>
   <ReadonlyBanner :show="isReadonly" />
 
-  <div class="pp-workbench-header pp-card">
-    <a-page-header
-      :title="project?.title ?? '加载中...'"
-      sub-title="工作台 · 文件 + AI 对话 + 预览"
-      class="pp-workbench-page-header"
-    >
-      <template #extra>
-        <!-- v0.21 任务 1: 一键全程挖掘（仅 agent_sdk 模式可见） -->
-        <a-button
-          v-if="!isReadonly && project && ui.agentMode === 'agent_sdk'"
-          type="primary"
-          :loading="fullMining"
-          :disabled="chat.streaming && !fullMining"
-          class="pp-btn-onekey"
-          @click="runFullMining"
-        >
-          ⚡ 一键全程挖掘
-        </a-button>
-        <a-button
-          v-if="!isReadonly && project"
-          type="primary"
-          :loading="generating"
-          @click="generateDisclosureDocx"
-        >
-          🎯 生成交底书 .docx
-        </a-button>
-      </template>
-      <template #footer>
-        <a-steps
-          v-if="project"
-          :current="currentStep"
-          size="small"
-          class="pp-workbench-steps"
-        >
-          <a-step title="报门（提交创意）" />
-          <a-step title="挖掘" />
-          <a-step title="检索" />
-          <a-step title="撰写" />
-          <a-step title="完成" />
-        </a-steps>
-        <!-- v0.20 Wave1 任务 1: 5 章节并行进度（仅 agent_sdk 模式显示） -->
-        <a-steps
-          v-if="ui.agentMode === 'agent_sdk'"
-          :current="sectionCurrentIdx"
-          size="small"
-          class="pp-workbench-steps pp-workbench-steps-sections"
-        >
-          <a-step
-            v-for="s in SECTION_STEPS"
-            :key="s.key"
-            :title="s.title"
-            :status="stepStatus(s.key)"
-          />
-        </a-steps>
-      </template>
-    </a-page-header>
+  <!-- v0.37: 紧凑标题栏（1 行 36px 高） -->
+  <div class="pp-wb-bar">
+    <span class="pp-wb-title" :title="project?.title">{{ project?.title ?? '加载中...' }}</span>
+    <span class="pp-wb-actions">
+      <!-- v0.37: 没有任何挖掘历史时显示"开始挖掘"主按钮；已有历史时显示"重新挖掘"次按钮 -->
+      <a-button v-if="!isReadonly && project && ui.agentMode === 'agent_sdk' && !hasMiningHistory"
+                size="small" type="primary"
+                :loading="fullMining || restartMining"
+                :disabled="chat.streaming"
+                @click="startMining">▶ 开始挖掘</a-button>
+      <a-button v-if="!isReadonly && project && ui.agentMode === 'agent_sdk' && hasMiningHistory"
+                size="small" :loading="restartMining"
+                @click="restartFromScratch">🔄 重新挖掘</a-button>
+      <a-button v-if="!isReadonly && project"
+                size="small"
+                :type="chat.readyForDocx ? 'primary' : 'default'"
+                :loading="generating"
+                :class="{ 'pp-btn-docx-ready': chat.readyForDocx }"
+                @click="generateDisclosureDocx">🎯 生成交底书 .docx</a-button>
+    </span>
   </div>
 
-  <div class="pp-workbench-grid">
-    <!-- 左：聊天 -->
+  <div class="pp-workbench-grid" :class="{ 'pp-workbench-grid-pinned': ui.previewMode === 'pinned' }">
+    <!-- 中：聊天（恒满宽，pinned 时让 480px 给右栏） -->
     <div class="pp-pane pp-pane-mid">
       <AgentChatStream
         v-if="project"
@@ -332,28 +334,83 @@ function onRoundComplete() {
       />
     </div>
 
-    <!-- 右：文件预览（v0.35.2：删 mini chat 重复显示；右栏始终是文件预览） -->
-    <div class="pp-pane pp-pane-right">
-      <FilePreviewer />
+    <!-- pinned 模式：右栏回固定列（兼容老布局习惯） -->
+    <div v-if="ui.previewMode === 'pinned'" class="pp-pane pp-pane-right">
+      <div class="pp-preview-header">
+        <span class="pp-preview-title">📎 文件预览</span>
+        <a-space :size="4">
+          <a-tooltip title="全屏">
+            <a-button size="small" type="text" @click="ui.togglePreviewFullscreen">⛶</a-button>
+          </a-tooltip>
+          <a-tooltip title="切换为浮层">
+            <a-button size="small" type="text" @click="ui.togglePreviewPin">📌</a-button>
+          </a-tooltip>
+          <a-tooltip title="关闭">
+            <a-button size="small" type="text" @click="ui.closePreview">×</a-button>
+          </a-tooltip>
+        </a-space>
+      </div>
+      <div class="pp-preview-body"><FilePreviewer /></div>
     </div>
   </div>
+
+  <!-- 浮层 Drawer：drawer(50%) / fullscreen(100%)。pinned 时不显示 -->
+  <a-drawer
+    :open="ui.previewMode === 'drawer' || ui.previewMode === 'fullscreen'"
+    :width="ui.previewMode === 'fullscreen' ? '100vw' : '50%'"
+    placement="right"
+    :mask="ui.previewMode === 'fullscreen'"
+    :mask-closable="true"
+    :closable="false"
+    :body-style="{ padding: 0, overflow: 'hidden', display: 'flex', flexDirection: 'column' }"
+    :header-style="{ padding: '8px 16px', borderBottom: '1px solid var(--pp-color-border-soft)' }"
+    @close="ui.closePreview"
+  >
+    <template #title>
+      <div class="pp-preview-header pp-preview-header-drawer">
+        <span class="pp-preview-title">📎 文件预览</span>
+        <a-space :size="4">
+          <a-tooltip :title="ui.previewMode === 'fullscreen' ? '退出全屏' : '全屏'">
+            <a-button size="small" type="text" @click="ui.togglePreviewFullscreen">
+              {{ ui.previewMode === 'fullscreen' ? '⛶ 退出全屏' : '⛶ 全屏' }}
+            </a-button>
+          </a-tooltip>
+          <a-tooltip title="钉为固定右栏（恢复老布局）">
+            <a-button size="small" type="text" @click="ui.togglePreviewPin">📌 钉住</a-button>
+          </a-tooltip>
+          <a-tooltip title="关闭">
+            <a-button size="small" type="text" @click="ui.closePreview">× 关闭</a-button>
+          </a-tooltip>
+        </a-space>
+      </div>
+    </template>
+    <FilePreviewer />
+  </a-drawer>
 </template>
 
 <style scoped>
-.pp-workbench-header {
-  margin-bottom: var(--pp-space-4);
-}
-.pp-card {
+/* v0.37: 紧凑标题栏 —— 1 行 36px，靠边对齐，去掉巨大 padding */
+.pp-wb-bar {
+  display: flex;
+  align-items: center;
+  gap: var(--pp-space-3);
+  padding: 6px 12px;
+  margin-bottom: 8px;
   background: var(--pp-color-surface);
-  border-radius: var(--pp-radius-lg);
-  box-shadow: var(--pp-shadow-sm);
   border: 1px solid var(--pp-color-border-soft);
-  padding: var(--pp-space-5);
+  border-radius: var(--pp-radius-md);
 }
-.pp-workbench-page-header {
-  padding: 0 !important;
-  font-family: var(--pp-font-sans);
+.pp-wb-title {
+  flex: 1;
+  font-size: 15px;
+  font-weight: var(--pp-font-weight-semibold);
+  color: var(--pp-color-text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
 }
+.pp-wb-actions { display: inline-flex; gap: 6px; }
 .pp-workbench-steps {
   margin-top: var(--pp-space-3);
   min-height: 48px;
@@ -457,14 +514,25 @@ function onRoundComplete() {
   box-shadow: var(--pp-shadow-md);
   transform: translateY(-1px);
 }
+/* v0.36: docx 按钮 ready 高亮（interview agent 发出 [READY_FOR_DOCX] 后） */
+.pp-btn-docx-ready {
+  animation: pp-btn-pulse 2s ease-in-out infinite;
+}
+@keyframes pp-btn-pulse {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(91, 108, 255, 0.4); }
+  50%      { box-shadow: 0 0 0 8px rgba(91, 108, 255, 0); }
+}
 
 .pp-workbench-grid {
   display: grid;
-  grid-template-columns: 1fr 480px;
+  grid-template-columns: 1fr;
   gap: var(--pp-space-4);
-  height: calc(100vh - 280px);
+  height: calc(100vh - 120px);  /* v0.37: header 56 + content margin 16 + 紧凑标题栏 36 + grid margin 8 + 缓冲 */
   min-height: 480px;
   margin-top: var(--pp-space-4);
+}
+.pp-workbench-grid-pinned {
+  grid-template-columns: 1fr 480px;
 }
 .pp-pane {
   border: 1px solid var(--pp-color-border-soft);
@@ -477,14 +545,36 @@ function onRoundComplete() {
   min-width: 0;
 }
 .pp-pane-right { min-width: 380px; }
+.pp-preview-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--pp-color-border-soft);
+  background: var(--pp-color-surface);
+}
+.pp-preview-header-drawer {
+  padding: 0;
+  border-bottom: none;
+}
+.pp-preview-title {
+  font-size: 14px;
+  font-weight: var(--pp-font-weight-semibold);
+  color: var(--pp-color-text);
+}
+.pp-preview-body {
+  flex: 1;
+  overflow: auto;
+  min-height: 0;
+}
 
 @media (max-width: 1280px) {
-  .pp-workbench-grid {
+  .pp-workbench-grid-pinned {
     grid-template-columns: 1fr 420px;
   }
 }
 @media (max-width: 1024px) {
-  .pp-workbench-grid {
+  .pp-workbench-grid-pinned {
     grid-template-columns: 1fr;
   }
   .pp-pane-right { display: none; }

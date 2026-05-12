@@ -104,7 +104,14 @@ type AntdTreeNode = {
 };
 
 function toAntdTreeData(parentId: string | null): AntdTreeNode[] {
-  return files.children(parentId).map((n: FileNode) => ({
+  let nodes = files.children(parentId);
+  // v0.37: 根目录把"本系统文档"排到末尾（紧贴 kb 之前），和 kb 一样视觉风格
+  if (parentId === null) {
+    const docs = nodes.filter((n: FileNode) => n.id.startsWith('root-docs-'));
+    const rest = nodes.filter((n: FileNode) => !n.id.startsWith('root-docs-'));
+    nodes = [...rest, ...docs];
+  }
+  return nodes.map((n: FileNode) => ({
     key: n.id,
     title: n.name,
     isLeaf: n.kind === 'file',
@@ -189,6 +196,8 @@ function iconFor(node: FileNode): string {
   if (node.kind === 'folder') {
     if (node.id === 'kb-root') return '📚';
     if (node.source === 'kb') return '📂';
+    // v0.37: 本系统文档根 → 📖；其子文件夹继续用 📁
+    if (node.id.startsWith('root-docs-')) return '📖';
     return '📁';
   }
   const m: FileMime | undefined = node.mime;
@@ -211,6 +220,11 @@ function childCount(node: FileNode): number {
 const newFolderOpen = ref(false);
 const newFolderName = ref('');
 function openNewFolder() {
+  // v0.37: 父文件夹只读时拒新建
+  if (currentFolderId.value && isReadonlyTree(currentFolderId.value)) {
+    message.warning('「本系统文档」是只读的，请选别的文件夹再新建');
+    return;
+  }
   newFolderName.value = '';
   newFolderOpen.value = true;
 }
@@ -222,6 +236,10 @@ function confirmNewFolder() {
   }
   if (currentFolderId.value === null) {
     message.error('请先在左侧选择一个父文件夹');
+    return;
+  }
+  if (isReadonlyTree(currentFolderId.value)) {
+    message.warning('「本系统文档」是只读的，不能在此新建');
     return;
   }
   files.addFolder({ name, parentId: currentFolderId.value, source: 'user' });
@@ -255,6 +273,11 @@ async function readAsText(file: File): Promise<string> {
 async function beforeUpload(file: File): Promise<boolean> {
   if (currentFolderId.value === null) {
     message.error('请先选择一个父文件夹');
+    return false;
+  }
+  // v0.37: 拒绝上传到只读子树
+  if (isReadonlyTree(currentFolderId.value)) {
+    message.warning('「本系统文档」是只读的，请选别的文件夹再上传');
     return false;
   }
   const mime = inferMimeFromName(file.name);
@@ -577,9 +600,27 @@ const renameOpen = ref(false);
 const renameValue = ref('');
 const renameTargetId = ref<string | null>(null);
 
+// v0.37: 检查节点本身或祖先是否 readonly
+function isReadonlyTree(id: string | null): boolean {
+  let cur = id;
+  const seen = new Set<string>();
+  while (cur && !seen.has(cur)) {
+    seen.add(cur);
+    const n = files.getNode(cur);
+    if (!n) return false;
+    if (n.readonly) return true;
+    cur = n.parentId;
+  }
+  return false;
+}
+
 function openRename(id: string) {
   const n = files.getNode(id);
   if (!n) return;
+  if (isReadonlyTree(id)) {
+    message.warning('「本系统文档」是只读的，不能重命名');
+    return;
+  }
   renameTargetId.value = id;
   renameValue.value = n.name;
   renameOpen.value = true;
@@ -599,6 +640,10 @@ function confirmRename() {
 function confirmRemove(id: string) {
   const n = files.getNode(id);
   if (!n) return;
+  if (isReadonlyTree(id)) {
+    message.warning('「本系统文档」是只读的，不能删除');
+    return;
+  }
   AModal.confirm({
     title: `确认删除 "${n.name}"？`,
     content: n.kind === 'folder' ? '将连同子项一并删除，无法恢复。' : '删除后无法恢复。',
@@ -621,6 +666,11 @@ function deleteSelected() {
   }
   if (findKbNode(id)) {
     message.warning('「专利知识」是只读的，不可删除');
+    return;
+  }
+  // v0.37: 本系统文档只读子树拒删
+  if (isReadonlyTree(id)) {
+    message.warning('「本系统文档」是只读的，不能删除');
     return;
   }
   const node = files.getNode(id);
@@ -751,15 +801,6 @@ function renderNodeTitle(node: AntdTreeNode) {
           <template #icon><DeleteOutlined /></template>
         </AButton>
       </ATooltip>
-      <ATooltip :title="checkable ? `批量删（已勾选 ${checkedKeys.length} 项）` : '开启多选模式（每节点出 checkbox，可批量删）'">
-        <AButton type="text" size="small"
-                 :class="{ 'pp-active': checkable }"
-                 @click="checkable && checkedKeys.length ? batchDelete() : toggleCheckable()">
-          <template #icon>
-            <span style="font-size:12px">{{ checkable ? `🗑×${checkedKeys.length}` : '☐' }}</span>
-          </template>
-        </AButton>
-      </ATooltip>
       <ATooltip title="刷新（从缓存重载）">
         <AButton type="text" size="small" @click="refreshTree">
           <template #icon><ReloadOutlined /></template>
@@ -813,8 +854,8 @@ function renderNodeTitle(node: AntdTreeNode) {
           <AProgress :percent="uploadPercent" size="small" status="active" />
         </div>
       </div>
-      <ADropdown :trigger="['contextmenu']">
-        <div>
+      <ADropdown :trigger="['contextmenu']" class="pp-tree-scroll-wrap">
+        <div class="pp-tree-scroll-wrap">
           <ATree
             :tree-data="treeData"
             :selected-keys="selectedKeys"
@@ -943,9 +984,28 @@ function renderNodeTitle(node: AntdTreeNode) {
 }
 :deep(.ant-tree .ant-tree-node-content-wrapper) {
   font-size: var(--pp-font-size-sm);
-  padding: 2px var(--pp-space-2);
+  padding: 0 4px;
+  min-height: 20px;
+  line-height: 20px;
   border-radius: var(--pp-radius-sm);
   transition: var(--pp-transition-fast);
+}
+/* v0.37: 紧凑文件树 */
+:deep(.ant-tree-treenode) {
+  padding: 0 !important;
+  line-height: 1.3;
+}
+:deep(.ant-tree .ant-tree-switcher) {
+  height: 20px;
+  line-height: 20px;
+  width: 16px;        /* ant 默认 24px → 16px */
+}
+:deep(.ant-tree-indent-unit) { width: 10px; }    /* ant 默认 24px → 10px 多级也省 */
+/* v0.37: 文件树独立滚动区，不影响父布局 */
+.pp-tree-scroll-wrap {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
 }
 :deep(.ant-tree .ant-tree-node-content-wrapper:hover) {
   background: var(--pp-color-surface-hover) !important;
@@ -1052,34 +1112,63 @@ function renderNodeTitle(node: AntdTreeNode) {
 <style>
 .pp-kb-modal .ant-modal-content {
   border-radius: var(--pp-radius-lg);
-  overflow: hidden;
+  overflow: visible;                          /* v0.37: 别裁 close 叉 */
   box-shadow: var(--pp-shadow-xl);
+  padding: 0;
 }
 .pp-kb-modal .ant-modal-header {
   background: var(--pp-color-primary);
   border-bottom: 0;
-  padding: var(--pp-space-3) var(--pp-space-5);
+  padding: 12px 56px 12px 20px;               /* v0.37: 右侧 56px 给 close 让位 */
+  border-radius: var(--pp-radius-lg) var(--pp-radius-lg) 0 0;
+  margin: 0;
 }
 .pp-kb-modal .ant-modal-title {
-  color: var(--pp-color-text-inverse) !important;
+  color: #fff !important;
   font-weight: var(--pp-font-weight-semibold);
+  font-size: 14px;
+  line-height: 1.4;
 }
-/* v0.27 fix: 让 close 叉号完整显示在圆角内，避免被 overflow:hidden 切一半 */
+/* v0.37: close 叉绝对定位在 header 内右上角 */
 .pp-kb-modal .ant-modal-close {
-  top: 8px !important;
-  right: 8px !important;
-  width: 32px !important;
-  height: 32px !important;
-  border-radius: var(--pp-radius-sm);
-  display: flex;
+  position: absolute !important;
+  inset: 10px 12px auto auto !important;
+  top: 10px !important;
+  right: 12px !important;
+  width: 28px !important;
+  height: 28px !important;
+  min-width: 28px !important;
+  min-height: 28px !important;
+  border-radius: 4px !important;
+  background: rgba(255, 255, 255, 0.18) !important;
+  color: #fff !important;
+  z-index: 20;
+  display: inline-flex !important;
   align-items: center;
   justify-content: center;
-  color: #fff;
-  z-index: 10;
+  padding: 0;
 }
-.pp-kb-modal .ant-modal-close-x {
-  font-size: 16px;
-  line-height: 1;
+.pp-kb-modal .ant-modal-close:hover {
+  background: rgba(255, 255, 255, 0.32) !important;
+}
+/* v0.37: 强制居中所有子元素（antd 默认 ×子 span 行内布局会偏） */
+.pp-kb-modal .ant-modal-close > * {
+  width: 28px !important;
+  height: 28px !important;
+  display: inline-flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  font-size: 16px !important;
+  color: #fff !important;
+  line-height: 1 !important;
+}
+.pp-kb-modal .ant-modal-close .anticon,
+.pp-kb-modal .ant-modal-close .anticon svg {
+  vertical-align: middle;
+  color: #fff !important;
+}
+.pp-kb-modal .ant-modal-body {
+  padding: 16px 20px;
 }
 .pp-kb-modal .ant-modal-close:hover {
   background: rgba(255, 255, 255, 0.18);

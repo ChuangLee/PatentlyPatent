@@ -339,17 +339,21 @@ async def auto_mining(pid: str, body: AutoMineRequest, db: Session = Depends(get
             sections[0]["content"] = landscape_md + sections[0]["content"]
 
         for sec in sections:
+            # v0.36: ask 阶段（_问题清单.md）静默落盘，不在 chat 广播位置；
+            # 由 interview agent 在 chat 里对话式追问
+            is_ask = sec["phase"] != "auto"
             intro = (
-                f"\n✍️ 正在写「{sec['name'].replace('.md', '')}」...\n"
-                if sec["phase"] == "auto"
-                else f"\n📌 已生成「问题清单」，请看左侧 AI 输出/{sec['name']}\n"
+                ""
+                if is_ask
+                else f"\n✍️ 正在写「{sec['name'].replace('.md', '')}」...\n"
             )
-            for chunk in split_grapheme(intro, 3):
-                yield {"event": "delta", "data": json.dumps({"chunk": chunk}, ensure_ascii=False)}
-                await asyncio.sleep(0.02)
-            await asyncio.sleep(0.3)
+            if intro:
+                for chunk in split_grapheme(intro, 3):
+                    yield {"event": "delta", "data": json.dumps({"chunk": chunk}, ensure_ascii=False)}
+                    await asyncio.sleep(0.02)
+                await asyncio.sleep(0.3)
 
-            # 用 LLM（或 mock）填占位
+            # 用 LLM（或 mock）填占位（ask 节也填，静默写盘）
             filled = await fill_section(sec["content"], ctx)
 
             # 把文件真持久化到数据库
@@ -376,10 +380,11 @@ async def auto_mining(pid: str, body: AutoMineRequest, db: Session = Depends(get
             yield {"event": "file", "data": json.dumps({"node": node_out}, ensure_ascii=False)}
             await asyncio.sleep(0.4)
 
-            tick = f"   ✓ 已落到 AI 输出/{sec['name']}\n"
-            for chunk in split_grapheme(tick, 3):
-                yield {"event": "delta", "data": json.dumps({"chunk": chunk}, ensure_ascii=False)}
-                await asyncio.sleep(0.015)
+            if not is_ask:
+                tick = f"   ✓ 已落到 AI 输出/{sec['name']}\n"
+                for chunk in split_grapheme(tick, 3):
+                    yield {"event": "delta", "data": json.dumps({"chunk": chunk}, ensure_ascii=False)}
+                    await asyncio.sleep(0.015)
 
         # 项目状态更新
         with session_scope() as db2:
@@ -388,11 +393,8 @@ async def auto_mining(pid: str, body: AutoMineRequest, db: Session = Depends(get
                 p2.status = "researching"
 
         wrap = (
-            "\n✅ 自动挖掘完成。\n\n"
-            "你看下左侧文件树新冒出来的几个 md 文件——\n"
-            "  · 1~6 节是 AI 自动写的初稿，可点开右侧预览，有不准的告诉我改\n"
-            "  · _问题清单.md 是 AI 自己回答不了的几条，挑感兴趣的在下方回答即可\n\n"
-            "等你确认 / 补充完，我把所有章节合并生成完整的 .docx 交底书放到 AI 输出/专利交底书.docx。\n"
+            "\n✅ 初稿已落到「AI 输出/」下。\n\n"
+            "您可以随手点开右侧预览有不准的告诉我；也可以直接在下方对话框告诉我下一步要改/补什么。\n"
         )
         for chunk in split_grapheme(wrap, 3):
             yield {"event": "delta", "data": json.dumps({"chunk": chunk}, ensure_ascii=False)}

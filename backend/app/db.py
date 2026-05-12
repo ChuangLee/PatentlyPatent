@@ -88,6 +88,8 @@ def init_db():
             "ALTER TABLE users ADD COLUMN username VARCHAR(64)",
             "ALTER TABLE users ADD COLUMN password_hash VARCHAR(256)",
             "CREATE UNIQUE INDEX IF NOT EXISTS ux_users_username ON users(username)",
+            # v0.37: file_nodes 补 readonly 列（默认 0，老数据不变）
+            "ALTER TABLE file_nodes ADD COLUMN readonly INTEGER DEFAULT 0",
         ):
             try:
                 conn.execute(text(ddl))

@@ -2,13 +2,13 @@
 /**
  * 文件预览器 — 根据 useFilesStore().currentNode 渲染不同 mime 类型
  */
-import { computed, ref, watch } from 'vue';
+import { computed, nextTick, ref, watch } from 'vue';
 import AButton from 'ant-design-vue/es/button';
 import AEmpty from 'ant-design-vue/es/empty';
 import ASpin from 'ant-design-vue/es/spin';
 import { Textarea as ATextarea } from 'ant-design-vue/es/input';
 import message from 'ant-design-vue/es/message';
-import { marked } from 'marked';
+import { renderMarkdown, renderMermaidIn } from '@/utils/md';
 import { useFilesStore } from '@/stores/files';
 import { apiClient } from '@/api/client';
 import type { FileNode } from '@/types';
@@ -83,8 +83,7 @@ const renderedMd = computed<string>(() => {
   if (!node.value || node.value.kind !== 'file') return '';
   if (node.value.mime !== 'text/markdown') return '';
   const c = node.value.content ?? '';
-  // marked 在某些版本同步返回 string，按同步处理
-  return marked.parse(c, { async: false }) as string;
+  return renderMarkdown(c);
 });
 
 // ---- markdown 编辑模式 ----
@@ -94,11 +93,26 @@ const saving = ref(false);
 
 /** 编辑模式实时预览（基于 draft） */
 const editingRenderedMd = computed<string>(() => {
-  return marked.parse(editingDraft.value ?? '', { async: false }) as string;
+  return renderMarkdown(editingDraft.value ?? '');
 });
+
+// v0.37: markdown 渲染后异步替换 mermaid 占位为 SVG
+const previewRef = ref<HTMLElement | null>(null);
+const editingPreviewRef = ref<HTMLElement | null>(null);
+watch(renderedMd, () => {
+  nextTick(() => { void renderMermaidIn(previewRef.value); });
+}, { flush: 'post' });
+watch(editingRenderedMd, () => {
+  nextTick(() => { void renderMermaidIn(editingPreviewRef.value); });
+}, { flush: 'post' });
 
 function enterEdit() {
   if (!node.value || node.value.kind !== 'file' || node.value.mime !== 'text/markdown') return;
+  // v0.37: 只读文件拒绝进入编辑
+  if (node.value.readonly) {
+    message.warning('该文件只读，不能编辑');
+    return;
+  }
   editingDraft.value = node.value.content ?? '';
   editing.value = true;
 }
@@ -258,7 +272,7 @@ function downloadAsFile(n: FileNode) {
               <span class="pp-md-tip">左侧编辑 raw markdown，右侧实时预览</span>
             </template>
           </div>
-          <div v-if="!editing" class="preview-md" v-html="renderedMd" />
+          <div v-if="!editing" ref="previewRef" class="preview-md" v-html="renderedMd" />
           <div v-else class="pp-md-edit">
             <ATextarea
               v-model:value="editingDraft"
@@ -266,7 +280,7 @@ function downloadAsFile(n: FileNode) {
               :auto-size="false"
               spellcheck="false"
             />
-            <div class="preview-md pp-md-livepreview" v-html="editingRenderedMd" />
+            <div ref="editingPreviewRef" class="preview-md pp-md-livepreview" v-html="editingRenderedMd" />
           </div>
         </div>
 
@@ -497,6 +511,19 @@ function downloadAsFile(n: FileNode) {
 .preview-md :deep(h2) { font-size: var(--pp-font-size-xl); }
 .preview-md :deep(h3) { font-size: var(--pp-font-size-lg); }
 .preview-md :deep(p) { margin: var(--pp-space-2) 0; }
+.preview-md :deep(.pp-mermaid) {
+  margin: 12px 0;
+  padding: 12px;
+  background: #fafafa;
+  border: 1px solid var(--pp-color-border-soft);
+  border-radius: 6px;
+  text-align: center;
+  overflow-x: auto;
+}
+.preview-md :deep(.pp-mermaid svg) {
+  max-width: 100%;
+  height: auto;
+}
 .preview-md :deep(ul),
 .preview-md :deep(ol) { padding-left: var(--pp-space-5); }
 .preview-md :deep(code) {

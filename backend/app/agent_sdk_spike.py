@@ -52,11 +52,13 @@ def log_startup_status() -> None:
     放在 import 顶层调用会被 logging.basicConfig 之前的 root handler 吞掉，
     所以延迟到 logging 初始化完成后再打。
     """
+    from .config import assert_claude_cli_available
+    cli_path = assert_claude_cli_available()
     logger.info(
-        "agent_sdk_spike: use_real_llm=%s has_key=%s use_real_zhihuiya=%s",
-        settings.use_real_llm,
-        bool(settings.anthropic_api_key),
+        "agent_sdk_spike: claude_cli=%s use_real_zhihuiya=%s model=%s",
+        cli_path,
         settings.use_real_zhihuiya,
+        settings.anthropic_model,
     )
 
 
@@ -280,8 +282,8 @@ def _build_mcp_server():
         "file_search_in_project",
         (
             "在指定 project 文件树下按关键字模糊搜文件正文（content LIKE '%keyword%'，"
-            "kind='file'）。返回最多 5 条命中 [{file_id, name, snippet}]，"
-            "snippet 是 keyword 前后 80 字截取。"
+            "kind='file'）。覆盖「我的资料/」「AI 输出/」两个文件夹。"
+            "返回最多 5 条命中 [{file_id, name, snippet}]，snippet 是 keyword 前后 80 字截取。"
         ),
         {"project_id": str, "keyword": str},
     )
@@ -296,10 +298,92 @@ def _build_mcp_server():
         except Exception as exc:  # noqa: BLE001
             return _safe_tool_error("file_search_in_project", exc)
 
+    @tool(
+        "read_user_file",
+        (
+            "读用户上传的文件正文（「我的资料/」下）。"
+            "支持格式：PDF / Word .docx / PowerPoint .pptx / Excel .xlsx/.xls / "
+            "Markdown / 纯文本 / JSON / CSV。"
+            "（.doc/.ppt 老二进制格式暂不支持，需另存为新格式）。"
+            "name 是文件名（如 'AI和身份认证.pptx'）。返回 content 文本（最多 30000 字）。"
+        ),
+        {"project_id": str, "name": str},
+    )
+    async def read_user_file(args: dict[str, Any]) -> dict:
+        try:
+            return await _do_read_user_file(
+                project_id=(args or {}).get("project_id", ""),
+                name=(args or {}).get("name", ""),
+            )
+        except Exception as exc:  # noqa: BLE001
+            return _safe_tool_error("read_user_file", exc)
+
+    @tool(
+        "search_kb",
+        (
+            "查项目内置的「专利知识库」（refs/专利专家知识库/ 下 419 篇 md，含 CNIPA 审查指南、"
+            "知乎案例、复审无效案例、IPRdaily 等专家文章）。按关键字模糊匹配文件名 + 正文，"
+            "返回 top 5 命中 [{path, title, snippet}]。"
+            "适合查 CN 实务、审查指南条款、OA 答辩范式、判例等。"
+        ),
+        {"keyword": str},
+    )
+    async def search_kb(args: dict[str, Any]) -> dict:
+        try:
+            return await _do_search_kb(keyword=(args or {}).get("keyword", ""))
+        except Exception as exc:  # noqa: BLE001
+            return _safe_tool_error("search_kb", exc)
+
+    @tool(
+        "read_kb_file",
+        (
+            "读专利知识库中某个具体文件的完整内容。path 是相对 refs/专利专家知识库/ 的路径"
+            "（如 'CNIPA_审查指南2025修改/第二部分第十章.md'）。返回 markdown 内容（最多 30000 字）。"
+        ),
+        {"path": str},
+    )
+    async def read_kb_file(args: dict[str, Any]) -> dict:
+        try:
+            return await _do_read_kb_file(path=(args or {}).get("path", ""))
+        except Exception as exc:  # noqa: BLE001
+            return _safe_tool_error("read_kb_file", exc)
+
+    @tool(
+        "update_plan",
+        (
+            "声明 / 更新你当前轮的工作计划，让申请人在 chat 看到你的 TODO 列表与进度。"
+            "steps_json 是 JSON 字符串，形如 "
+            '\'[{"id":"s1","title":"查智慧芽 X.509+智能体 命中量","status":"in_progress"},'
+            '{"id":"s2","title":"读用户上传 PDF","status":"pending"}]\'。'
+            "status 取值：pending / in_progress / completed / failed。"
+            "**铁律**：(1) 任何需要 ≥2 步的工作，开始前必须调一次声明计划；"
+            "(2) 每步开始或完成时调一次更新状态；(3) 在最终交付前所有步骤应为 completed/failed。"
+            "前端会把它渲染为一个 in-place 更新的 Plan 卡片（不会每次都新建卡片）。"
+        ),
+        {"steps_json": str},
+    )
+    async def update_plan(args: dict[str, Any]) -> dict:
+        # no-op 服务端不需要做啥；前端 tool_use 事件里 input 已含 steps
+        # 但要 echo 回 input 便于 LLM 自己回看
+        try:
+            import json as _json
+            raw = (args or {}).get("steps_json", "") or "[]"
+            steps = _json.loads(raw) if isinstance(raw, str) else raw
+            if not isinstance(steps, list):
+                steps = []
+            n = len(steps)
+            n_done = sum(1 for s in steps if isinstance(s, dict) and s.get("status") == "completed")
+            n_run = sum(1 for s in steps if isinstance(s, dict) and s.get("status") == "in_progress")
+            text = f"计划已更新：{n} 步，已完成 {n_done}，进行中 {n_run}。"
+            return {"content": [{"type": "text", "text": text}], "data": steps}
+        except Exception as exc:  # noqa: BLE001
+            return _safe_tool_error("update_plan", exc)
+
     server = create_sdk_mcp_server(
         name="patent-tools",
-        version="0.4.0",
+        version="0.6.0",
         tools=[
+            update_plan,
             search_patents,
             search_trends,
             search_applicants,
@@ -308,9 +392,13 @@ def _build_mcp_server():
             legal_status,
             inventor_ranking,
             file_search_in_project,
+            read_user_file,
+            search_kb,
+            read_kb_file,
         ],
     )
     allowed = [
+        "mcp__patent-tools__update_plan",
         "mcp__patent-tools__search_patents",
         "mcp__patent-tools__search_trends",
         "mcp__patent-tools__search_applicants",
@@ -319,6 +407,9 @@ def _build_mcp_server():
         "mcp__patent-tools__legal_status",
         "mcp__patent-tools__inventor_ranking",
         "mcp__patent-tools__file_search_in_project",
+        "mcp__patent-tools__read_user_file",
+        "mcp__patent-tools__search_kb",
+        "mcp__patent-tools__read_kb_file",
     ]
     return server, allowed
 
@@ -448,6 +539,200 @@ async def _do_file_search_in_project(*, project_id: str, keyword: str) -> dict:
         "content": [{"type": "text", "text": text}],
         "data": results,
     }
+
+
+# ─── read_user_file 业务实现 ────────────────────────────────────────────────
+
+
+async def _do_read_user_file(*, project_id: str, name: str) -> dict:
+    """按文件名读 FileNode.content；
+    v0.37: 二进制（PDF/pptx/docx）若 DB 没存 text，去 storage 读 binary 现场提文本 + 回写缓存。
+    """
+    if not project_id or not name:
+        return {
+            "content": [{"type": "text", "text": "project_id 或 name 为空"}],
+            "isError": True,
+        }
+
+    def _sync_read() -> dict:
+        from .db import SessionLocal
+        from .models import FileNode
+        from .file_extract import can_extract, extract_text
+        from .config import settings as _settings
+        from pathlib import Path as _P
+        from datetime import datetime, timezone
+
+        db = SessionLocal()
+        try:
+            row = (
+                db.query(FileNode)
+                .filter(
+                    FileNode.project_id == project_id,
+                    FileNode.kind == "file",
+                    FileNode.name == name,
+                )
+                .first()
+            )
+            if row is None:
+                return {"ok": False, "msg": f"文件 '{name}' 在项目 {project_id} 中未找到"}
+            content = row.content or ""
+
+            # 没文本但是支持提取的二进制 → 现场提
+            if not content and can_extract(row.mime, row.name):
+                # storage 路径：storage/uploads/<pid>/<fid>/<name>
+                bin_path = _P(_settings.storage_root) / "uploads" / project_id / row.id / row.name
+                text = extract_text(bin_path, row.mime, row.name)
+                if text:
+                    content = text
+                    # 回写 DB 缓存，下次直接读 content
+                    row.content = content
+                    row.updated_at = datetime.now(timezone.utc)
+                    db.commit()
+
+            if not content:
+                return {
+                    "ok": False,
+                    "msg": (
+                        f"文件 '{name}' 是 {row.mime} ({row.size} bytes)，"
+                        f"未能提取文本（可能是图片型 PDF 或不支持的格式）。"
+                        f"可用 file_search_in_project 跨文件搜关键字，或让用户在 chat 里贴关键段落。"
+                    ),
+                }
+            return {
+                "ok": True,
+                "name": row.name,
+                "mime": row.mime,
+                "size": row.size,
+                "content": content[:30000],
+                "truncated": len(content) > 30000,
+            }
+        finally:
+            db.close()
+
+    res = await asyncio.to_thread(_sync_read)
+    if not res.get("ok"):
+        return {"content": [{"type": "text", "text": res.get("msg", "?")}], "isError": True}
+    body = (
+        f"文件 {res['name']} ({res['mime']}, {res['size']} bytes):\n\n{res['content']}"
+        + ("\n\n…(已截断到前 30000 字)" if res.get("truncated") else "")
+    )
+    return {"content": [{"type": "text", "text": body}]}
+
+
+# ─── search_kb / read_kb_file 业务实现 ──────────────────────────────────────
+
+
+_KB_ROOT_CACHE = None
+
+
+def _get_kb_root() -> "Path":
+    global _KB_ROOT_CACHE
+    if _KB_ROOT_CACHE is None:
+        from pathlib import Path
+        from .config import PROJECT_ROOT
+        _KB_ROOT_CACHE = (PROJECT_ROOT / "refs" / "专利专家知识库").resolve()
+    return _KB_ROOT_CACHE
+
+
+async def _do_search_kb(*, keyword: str) -> dict:
+    """扫 refs/专利专家知识库/ 下 .md 文件，按文件名 + 正文模糊匹配。"""
+    if not keyword or not keyword.strip():
+        return {"content": [{"type": "text", "text": "keyword 为空"}], "isError": True}
+
+    keyword = keyword.strip()
+
+    def _sync_scan() -> list[dict]:
+        from pathlib import Path
+        kb_root = _get_kb_root()
+        if not kb_root.exists():
+            return []
+        kw_lower = keyword.lower()
+        results: list[dict] = []
+        for md in kb_root.rglob("*.md"):
+            try:
+                rel = md.relative_to(kb_root).as_posix()
+            except ValueError:
+                continue
+            score = 0
+            snippet = ""
+            # 文件名/路径命中权重高
+            if kw_lower in rel.lower():
+                score += 10
+            try:
+                text = md.read_text(encoding="utf-8", errors="ignore")
+            except Exception:  # noqa: BLE001
+                continue
+            text_lower = text.lower()
+            idx = text_lower.find(kw_lower)
+            if idx >= 0:
+                score += 1
+                # 前后 100 字 snippet
+                start = max(0, idx - 100)
+                end = min(len(text), idx + len(keyword) + 100)
+                snippet = text[start:end].replace("\n", " ").strip()
+            if score > 0:
+                title = md.stem
+                results.append({
+                    "path": rel,
+                    "title": title,
+                    "snippet": snippet[:300],
+                    "_score": score,
+                })
+        results.sort(key=lambda r: -r["_score"])
+        return [{k: v for k, v in r.items() if not k.startswith("_")} for r in results[:5]]
+
+    try:
+        results = await asyncio.to_thread(_sync_scan)
+    except Exception as exc:  # noqa: BLE001
+        return {"content": [{"type": "text", "text": f"kb 搜索失败：{exc}"}], "isError": True}
+
+    if not results:
+        return {
+            "content": [{"type": "text", "text": f'专利知识库未命中"{keyword}"'}],
+            "data": [],
+        }
+    text = (
+        f'专利知识库命中 {len(results)} 个文件（按相关度排）:\n'
+        + json.dumps(results, ensure_ascii=False, indent=2)
+    )
+    return {"content": [{"type": "text", "text": text}], "data": results}
+
+
+async def _do_read_kb_file(*, path: str) -> dict:
+    """读 refs/专利专家知识库/<path> 文件内容。"""
+    if not path or not path.strip():
+        return {"content": [{"type": "text", "text": "path 为空"}], "isError": True}
+
+    def _sync_read() -> dict:
+        from pathlib import Path
+        kb_root = _get_kb_root()
+        rel = path.strip().lstrip("/")
+        full = (kb_root / rel).resolve()
+        # 防 ../ 越权
+        if not str(full).startswith(str(kb_root)):
+            return {"ok": False, "msg": "路径越权（escapes kb root）"}
+        if not full.exists() or not full.is_file():
+            return {"ok": False, "msg": f"文件不存在：{rel}"}
+        try:
+            text = full.read_text(encoding="utf-8", errors="ignore")
+        except Exception as exc:  # noqa: BLE001
+            return {"ok": False, "msg": f"读取失败：{exc}"}
+        return {
+            "ok": True,
+            "path": rel,
+            "size": len(text),
+            "content": text[:30000],
+            "truncated": len(text) > 30000,
+        }
+
+    res = await asyncio.to_thread(_sync_read)
+    if not res.get("ok"):
+        return {"content": [{"type": "text", "text": res.get("msg", "?")}], "isError": True}
+    body = (
+        f"kb/{res['path']} ({res['size']} bytes):\n\n{res['content']}"
+        + ("\n\n…(已截断到前 30000 字)" if res.get("truncated") else "")
+    )
+    return {"content": [{"type": "text", "text": body}]}
 
 
 # ─── file_write_section 业务实现（独立出来便于复用 / 测试） ──────────────────
@@ -759,188 +1044,6 @@ async def _stream_real_sdk(idea_text: str, max_turns: int) -> AsyncIterator[dict
     yield {"type": "done", "stop_reason": "end_of_stream"}
 
 
-# ─── Mock 路径 ──────────────────────────────────────────────────────────────
-
-
-async def _stream_mock(idea_text: str) -> AsyncIterator[dict]:
-    """没有真 key 时演示完整流程：thinking → 多个 tool_use/tool_result → delta×N → done。
-
-    v0.17-A：演示 4 个 tool（含新加的 search_trends / search_applicants /
-    file_write_section）。file_write_section 走 dry-run，不真写库（mock 模式）。
-    """
-    yield {"type": "thinking", "text": f"分析构思：{idea_text[:60]}…"}
-    await asyncio.sleep(0.05)
-
-    # 简单从输入抽取一个关键词当 demo query
-    keyword = "区块链 AND 供应链" if "区块链" in idea_text else (idea_text[:20] or "通用关键词")
-    mock_query = f"TAC: ({keyword})"
-
-    # ---- tool 1: search_patents ------------------------------------------
-    yield {
-        "type": "tool_use",
-        "name": "search_patents",
-        "input": {"query": mock_query},
-        "id": "mock-tool-1",
-    }
-    await asyncio.sleep(0.03)
-    try:
-        count = await zhihuiya.query_search_count(mock_query) if settings.use_real_zhihuiya else 12345
-    except Exception:  # noqa: BLE001
-        count = 12345
-    yield {"type": "tool_result", "text": f'检索式 "{mock_query}" 命中 {count} 件', "count": count}
-    await asyncio.sleep(0.03)
-
-    # ---- tool 2: search_trends -------------------------------------------
-    yield {
-        "type": "tool_use",
-        "name": "search_trends",
-        "input": {"query": mock_query, "lang": "cn"},
-        "id": "mock-tool-2",
-    }
-    await asyncio.sleep(0.03)
-    try:
-        trends = (
-            await zhihuiya.patent_trends(mock_query, lang="cn")
-            if settings.use_real_zhihuiya
-            else [
-                {"year": 2017, "count": 120}, {"year": 2018, "count": 240},
-                {"year": 2019, "count": 410}, {"year": 2020, "count": 720},
-                {"year": 2021, "count": 980}, {"year": 2022, "count": 1100},
-                {"year": 2023, "count": 1320}, {"year": 2024, "count": 1280},
-                {"year": 2025, "count": 1190},
-            ]
-        )
-    except Exception:  # noqa: BLE001
-        trends = []
-    trends = (trends or [])[-10:]
-    yield {
-        "type": "tool_result",
-        "text": json.dumps(trends, ensure_ascii=False),
-        "data": trends,
-    }
-    await asyncio.sleep(0.03)
-
-    # ---- tool 3: search_applicants ---------------------------------------
-    yield {
-        "type": "tool_use",
-        "name": "search_applicants",
-        "input": {"query": mock_query, "lang": "cn"},
-        "id": "mock-tool-3",
-    }
-    await asyncio.sleep(0.03)
-    if settings.use_real_zhihuiya:
-        try:
-            raw = await zhihuiya.applicant_ranking(mock_query, lang="cn", n=10)
-        except Exception:  # noqa: BLE001
-            raw = []
-        applicants = []
-        for item in (raw or [])[:10]:
-            if isinstance(item, dict):
-                applicants.append({
-                    "name": str(item.get("name") or item.get("applicant") or ""),
-                    "count": int(item.get("count") or item.get("num") or 0),
-                })
-    else:
-        applicants = [
-            {"name": "腾讯", "count": 320},
-            {"name": "阿里巴巴", "count": 285},
-            {"name": "蚂蚁集团", "count": 210},
-            {"name": "百度", "count": 180},
-            {"name": "京东", "count": 142},
-        ]
-    yield {
-        "type": "tool_result",
-        "text": json.dumps(applicants, ensure_ascii=False),
-        "data": applicants,
-    }
-    await asyncio.sleep(0.03)
-
-    # ---- tool 5: inventor_ranking ---------------------------------------
-    yield {
-        "type": "tool_use",
-        "name": "inventor_ranking",
-        "input": {"query": mock_query, "lang": "cn"},
-        "id": "mock-tool-5",
-    }
-    await asyncio.sleep(0.03)
-    if settings.use_real_zhihuiya:
-        try:
-            inv_raw = await zhihuiya.inventor_ranking(mock_query, lang="cn", n=10)
-        except Exception:  # noqa: BLE001
-            inv_raw = []
-        inventors = _normalize_inventor_list(inv_raw)
-    else:
-        inventors = [
-            {"name": "张伟", "count": 42},
-            {"name": "李娜", "count": 36},
-            {"name": "王芳", "count": 28},
-            {"name": "刘洋", "count": 22},
-            {"name": "陈鹏", "count": 18},
-        ]
-    yield {
-        "type": "tool_result",
-        "text": json.dumps(inventors, ensure_ascii=False),
-        "data": inventors,
-    }
-    await asyncio.sleep(0.03)
-
-    # ---- tool 6: file_search_in_project（mock 模式不真查） -----------------
-    yield {
-        "type": "tool_use",
-        "name": "file_search_in_project",
-        "input": {"project_id": "(mock)", "keyword": keyword.split()[0] if keyword else "区块链"},
-        "id": "mock-tool-6",
-    }
-    await asyncio.sleep(0.03)
-    yield {
-        "type": "tool_result",
-        "text": "mock 模式：未真查 DB。真实模式下会按 content LIKE 模糊匹配最多 5 个文件。",
-    }
-    await asyncio.sleep(0.03)
-
-    # ---- tool 4: file_write_section（mock 不真写） ------------------------
-    yield {
-        "type": "tool_use",
-        "name": "file_write_section",
-        "input": {
-            "project_id": "(mock)",
-            "name": "agent 分析摘要",
-            "content": "（演示：mock 模式不写库）",
-            "parent_folder": "AI 输出",
-        },
-        "id": "mock-tool-4",
-    }
-    await asyncio.sleep(0.03)
-    yield {
-        "type": "tool_result",
-        "text": "mock 模式：未真实写入。真实模式下会创建 AI 输出/agent 分析摘要.md",
-    }
-    await asyncio.sleep(0.03)
-
-    # ---- 最终 deltas ------------------------------------------------------
-    chunks = [
-        f"根据检索结果，相关方向已有 {count} 件公开专利，",
-        f"近 10 年趋势数据点 {len(trends)} 条，",
-        f"Top 申请人 {len(applicants)} 家，",
-        "属于较为活跃的技术领域。",
-        "建议从以下差异化角度切入：\n",
-        "1) 共识机制与轻量化签名结合，降低 TPS 瓶颈；\n",
-        "2) 跨链验证溯源链的零知识证明压缩；\n",
-        "3) 边缘节点与物联网传感器联合上链；\n",
-        "（mock 模式输出，未走真 LLM）",
-    ]
-    for c in chunks:
-        yield {"type": "delta", "text": c}
-        await asyncio.sleep(0.02)
-
-    yield {
-        "type": "done",
-        "stop_reason": "mock_complete",
-        "mock": True,
-        "ts": datetime.now(timezone.utc).isoformat(),
-    }
-
-
 # ─── 对外入口 ───────────────────────────────────────────────────────────────
 
 
@@ -951,33 +1054,17 @@ async def agent_mine_stream(
     endpoint: str = "mine_spike",
     project_id: str | None = None,
 ) -> AsyncIterator[dict]:
-    """统一入口。无 key 或 SDK 异常时走 mock。
-
-    v0.19: 入口包 timer + 写 AgentRunLog（监控失败绝不阻塞业务）。
-    """
+    """统一入口。SDK 异常 yield error 事件并写 AgentRunLog。"""
     idea_text = (idea_text or "").strip()
     if not idea_text:
         yield {"type": "error", "message": "idea 为空"}
         return
 
     t0 = time.monotonic()
-    is_mock = not settings.use_agent_sdk_real
-    fallback_used = False
     last_done: dict | None = None
     last_error: str | None = None
 
     try:
-        # v0.18-A: 走 agent SDK 真路径只需 claude CLI（OAuth 认证），不强求 ANTHROPIC_API_KEY
-        if is_mock:
-            async for ev in _stream_mock(idea_text):
-                if ev.get("type") == "done":
-                    last_done = ev
-                elif ev.get("type") == "error":
-                    last_error = ev.get("message")
-                yield ev
-            return
-
-        # 真 SDK 路径，外层兜底
         try:
             async for ev in _stream_real_sdk(idea_text, max_turns):
                 if ev.get("type") == "done":
@@ -986,14 +1073,9 @@ async def agent_mine_stream(
                     last_error = ev.get("message")
                 yield ev
         except Exception as exc:  # noqa: BLE001
-            logger.exception("agent_sdk real path failed, falling back to mock")
-            fallback_used = True
-            last_error = f"SDK 调用失败，降级 mock：{exc}"
+            logger.exception("agent_sdk real path failed")
+            last_error = f"{type(exc).__name__}: {exc}"
             yield {"type": "error", "message": last_error}
-            async for ev in _stream_mock(idea_text):
-                if ev.get("type") == "done":
-                    last_done = ev
-                yield ev
     finally:
         duration_ms = int((time.monotonic() - t0) * 1000)
         try:
@@ -1004,8 +1086,6 @@ async def agent_mine_stream(
                 duration_ms=duration_ms,
                 done=last_done,
                 error=last_error,
-                is_mock=is_mock or fallback_used,
-                fallback_used=fallback_used,
             )
         except Exception as exc:  # noqa: BLE001
             # 监控失败绝不阻塞业务
@@ -1023,8 +1103,6 @@ async def _write_run_log(
     duration_ms: int,
     done: dict | None,
     error: str | None,
-    is_mock: bool,
-    fallback_used: bool,
 ) -> None:
     """同步 ORM 用 to_thread 包一层。失败由调用方 try 兜住。"""
     num_turns = None
@@ -1049,9 +1127,9 @@ async def _write_run_log(
                 total_cost_usd=total_cost_usd,
                 duration_ms=duration_ms,
                 stop_reason=(stop_reason or None) and str(stop_reason)[:32],
-                fallback_used=bool(fallback_used),
+                fallback_used=False,
                 error=(error or None) and str(error)[:2000],
-                is_mock=bool(is_mock),
+                is_mock=False,
             )
             db.add(row)
             db.commit()

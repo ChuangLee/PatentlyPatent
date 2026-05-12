@@ -1,6 +1,7 @@
 """集中配置：从环境变量 + .secrets/*.env 加载"""
 from __future__ import annotations
 import os
+import shutil
 from pathlib import Path
 from pydantic import BaseModel
 from dotenv import load_dotenv
@@ -38,24 +39,20 @@ class Settings(BaseModel):
         str(PROJECT_ROOT / "backend" / "storage"),
     ))
 
-    # LLM
-    anthropic_api_key: str = os.environ.get("ANTHROPIC_API_KEY", "")
+    # LLM 模型（claude-agent-sdk 的 model alias，传给 CLI）
     anthropic_model: str = os.environ.get("PP_MODEL", "claude-opus-4-7")
     anthropic_light_model: str = os.environ.get("PP_LIGHT_MODEL", "claude-sonnet-4-6")
-    mock_llm: bool = os.environ.get("PP_MOCK_LLM", "").lower() in ("1", "true", "yes")
 
-    # v0.18-B：prior_art 章节是否走 agent 智能版（失败 fallback 到 legacy）
+    # 章节级 agent 智能版开关（保留 —— 这些不是 mock 开关，而是模板 vs agent 的灰度）
     agent_prior_art: bool = os.environ.get("PP_AGENT_PRIOR_ART", "").lower() in (
         "1", "true", "yes",
     )
-    # v0.19-C：embodiments / claims 章节是否走 agent 智能版（失败 fallback 到 legacy）
     agent_embodiments: bool = os.environ.get("PP_AGENT_EMBODIMENTS", "").lower() in (
         "1", "true", "yes",
     )
     agent_claims: bool = os.environ.get("PP_AGENT_CLAIMS", "").lower() in (
         "1", "true", "yes",
     )
-    # v0.20 Wave1：drawings_description / summary 章节是否走 agent 智能版
     agent_drawings: bool = os.environ.get("PP_AGENT_DRAWINGS", "").lower() in (
         "1", "true", "yes",
     )
@@ -63,11 +60,11 @@ class Settings(BaseModel):
         "1", "true", "yes",
     )
 
-    # v0.21：JWT auth（最小可用版）
+    # JWT auth
     jwt_secret: str = os.environ.get("PP_JWT_SECRET", "dev-secret-change-in-prod")
     jwt_expire_hours: int = int(os.environ.get("PP_JWT_EXPIRE_HOURS", "24"))
 
-    # v0.23：CAS protocol 2.0/3.0 SSO（与 JWT 共存）
+    # CAS protocol 2.0/3.0 SSO（与 JWT 共存）
     cas_enabled: bool = os.environ.get("PP_CAS_ENABLED", "").lower() in ("1", "true", "yes")
     cas_server_url: str = os.environ.get("PP_CAS_SERVER", "https://casdoor.org/cas/example/app-cas")
     cas_service_url: str = os.environ.get(
@@ -77,30 +74,52 @@ class Settings(BaseModel):
         "PP_CAS_FRONT_REDIRECT", "https://blind.pub/patent/login",
     )
 
-    # 智慧芽
+    # 智慧芽（数据源仍可缺失，缺则 zhihuiya.py 会抛 ZhihuiyaError）
     zhihuiya_token: str = os.environ.get("ZHIHUIYA_TOKEN", "")
     zhihuiya_api_base: str = os.environ.get(
         "ZHIHUIYA_API_BASE", "https://connect.zhihuiya.com",
     )
 
-    @property
-    def use_real_llm(self) -> bool:
-        return not self.mock_llm and bool(self.anthropic_api_key)
+    # 测试桩开关：仅 conftest 用来跳过启动期 CLI 校验。生产代码不读它。
+    skip_cli_check: bool = os.environ.get("PP_SKIP_CLI_CHECK", "").lower() in (
+        "1", "true", "yes",
+    )
 
     @property
     def use_real_zhihuiya(self) -> bool:
         return bool(self.zhihuiya_token)
 
-    @property
-    def use_agent_sdk_real(self) -> bool:
-        """v0.18-A: agent SDK 不走直 API，走 claude CLI 子进程；
-        只要 claude 二进制可调，就能用 CLI 自身的 OAuth 认证；
-        ANTHROPIC_API_KEY 不是必须的。"""
-        if self.mock_llm:
-            return False
-        import shutil
-        return shutil.which("claude") is not None or bool(self.anthropic_api_key)
-
 
 settings = Settings()
 settings.storage_root.mkdir(parents=True, exist_ok=True)
+
+
+def assert_claude_cli_available() -> str:
+    """启动期硬校验：claude CLI 必须可用。返回 CLI 路径。
+
+    优先用 claude-agent-sdk 自带的 bundled CLI（不依赖系统 PATH），
+    其次 fallback 到 PATH 上的 `claude`。两者都没就直接 RuntimeError。
+    测试通过 PP_SKIP_CLI_CHECK=1 跳过。
+    """
+    if settings.skip_cli_check:
+        return "(skipped by PP_SKIP_CLI_CHECK)"
+
+    # 1) bundled SDK CLI
+    try:
+        import claude_agent_sdk  # noqa: F401
+        sdk_dir = Path(claude_agent_sdk.__file__).resolve().parent
+        bundled = sdk_dir / "_bundled" / "claude"
+        if bundled.exists():
+            return str(bundled)
+    except Exception:
+        pass
+
+    # 2) system PATH
+    p = shutil.which("claude")
+    if p:
+        return p
+
+    raise RuntimeError(
+        "claude CLI 不可用：既未找到 claude-agent-sdk bundled CLI，"
+        "PATH 上也没有 `claude`。请安装 claude-agent-sdk 或把 claude 加入 PATH。"
+    )

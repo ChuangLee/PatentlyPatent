@@ -87,6 +87,18 @@ export const chatApi = {
     }, onEvent, signal);
   },
 
+  /** v0.36: interview agent —— 资深专利代理人对话式追问 */
+  interviewStream(projectId: string,
+                  body: { user_msg?: string; history?: Array<{ role: string; content: string }> },
+                  onEvent: (e: ChatStreamEvent) => void,
+                  signal?: AbortSignal): Promise<void> {
+    return consumeSSE(`${_apiBase()}/agent/interview/${projectId}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    }, onEvent, signal);
+  },
+
   /**
    * v0.34: detached agent runs — 客户端断开不影响后端 task 跑完，
    * 重新打开页面 SSE tail since=last_seq 即可恢复显示。

@@ -94,6 +94,44 @@ def create_project(
             created_at=now, updated_at=now,
         ))
 
+    # v0.37: 报门文字自动落地到「我的资料/0-报门.md」让员工随手能看，agent 也能 read_user_file
+    intake_dict = body.intake.model_dump() if body.intake else None
+    stage_label = {"idea": "创意阶段", "prototype": "已有原型", "deployed": "已落地"}.get(
+        (intake_dict or {}).get("stage", ""), "—",
+    )
+    goal_label = {
+        "search_only": "仅检索",
+        "full_disclosure": "完整交底书",
+        "specific_section": "特定章节",
+    }.get((intake_dict or {}).get("goal", ""), "—")
+    intake_notes = (intake_dict or {}).get("notes", "") or "—"
+    intake_md = (
+        f"# 报门：{body.title}\n\n"
+        f"> 由系统自动落地，员工可随手翻看；AI 也能 read_user_file 读到。\n\n"
+        f"## 基本信息\n\n"
+        f"- **项目标题**：{body.title}\n"
+        f"- **技术领域**：{body.customDomain or body.domain}\n"
+        f"- **当前阶段**：{stage_label}\n"
+        f"- **本次目标**：{goal_label}\n"
+        f"- **报门时间**：{now.isoformat(timespec='seconds')}\n\n"
+        f"## 创意描述\n\n{body.description}\n\n"
+        + (f"## 补充说明\n\n{intake_notes}\n" if intake_notes != "—" else "")
+    )
+    db.add(FileNode(
+        id=f"f-intake-{pid}",
+        project_id=pid,
+        name="0-报门.md",
+        kind="file",
+        parent_id="root-user-" + pid,
+        source="user",
+        mime="text/markdown",
+        content=intake_md,
+        size=len(intake_md.encode("utf-8")),
+        readonly=False,    # 用户可以改，但通常不需要
+        created_at=now,
+        updated_at=now,
+    ))
+
     # 上传的 attachments → 我的资料/
     if body.attachments:
         for a in body.attachments:
@@ -114,6 +152,10 @@ def create_project(
                 content=a.content,
                 url=a.url,
             ))
+
+    # v0.37: 建第 4 个根"本系统文档"（只读，含 PRD/HLD/使用说明）
+    from ..system_docs import ensure_system_docs
+    ensure_system_docs(db, pid)
 
     db.commit()
     db.refresh(p)

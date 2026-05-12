@@ -145,7 +145,11 @@ async def _cached_call(
         _log_degrade(label, query_for_log, f"http {sc} (4xx)")
         return fallback
     except ZhihuiyaError as e:
-        _log_degrade(label, query_for_log, f"biz err: {e}")
+        msg = str(e)
+        _log_degrade(label, query_for_log, f"biz err: {msg}")
+        # v0.37: 账户余额不足/套餐到期等明确业务失败 → 上抛让 agent 知道，不要伪装"0 命中=蓝海"
+        if "Insufficient balance" in msg or "67200005" in msg or "67200202" in msg:
+            raise
         return fallback
     except Exception as e:  # noqa: BLE001
         _log_degrade(label, query_for_log, f"unexpected: {type(e).__name__}: {e}")
