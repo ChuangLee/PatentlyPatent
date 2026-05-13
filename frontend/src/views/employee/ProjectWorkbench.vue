@@ -14,7 +14,6 @@ import { useAuthStore } from '@/stores/auth';
 import AgentChatStream from '@/components/chat/AgentChatStream.vue';
 import FilePreviewer from '@/components/workbench/FilePreviewer.vue';
 import ReadonlyBanner from '@/components/common/ReadonlyBanner.vue';
-import { disclosureApi } from '@/api/disclosure';
 import { filesApi } from '@/api/files';
 import { takePendingUploads } from '@/stores/uploadQueue';
 import message from 'ant-design-vue/es/message';
@@ -30,7 +29,6 @@ const ui = useUIStore();
 const project = ref<Project | null>(null);
 const round = ref(1);
 const chatRef = ref<InstanceType<typeof AgentChatStream> | null>(null);
-const generating = ref(false);
 // v0.21 任务 1: 一键全程挖掘 loading
 const fullMining = ref(false);
 // v0.37: 重新挖掘按钮 loading
@@ -106,23 +104,6 @@ async function runFullMining() {
   }
 }
 
-async function generateDisclosureDocx() {
-  if (!project.value) return;
-  generating.value = true;
-  try {
-    const resp = await disclosureApi.generateDocx(project.value.id);
-    const node: FileNode = resp.file;
-    const exists = files.tree.find(n => n.id === node.id);
-    if (!exists) files.pushNode(node);
-    files.selectFile(node.id);
-    message.success('交底书已生成 → AI 输出/' + node.name);
-    if (project.value && resp.projectStatus) project.value.status = resp.projectStatus as ProjectStatus;
-  } catch (e) {
-    message.error('生成失败：' + (e as Error).message);
-  } finally {
-    generating.value = false;
-  }
-}
 
 /** status → a-steps current（0-based） */
 const STATUS_STEP: Record<ProjectStatus, number> = {
@@ -259,11 +240,9 @@ onMounted(async () => {
     }
   }
 
-  // v0.37: 不再自动启动挖掘。空项目时前端显示"开始挖掘"按钮让用户主动点
-  // 仅在已经有 detached run 在跑时才接管恢复（上面已处理）
-  // 老 mining 模式 (agent_sdk=false) 保留旧自动 autoMine 行为
+  // 自动启动挖掘：新建项目（无挖掘历史）+ 附件上传完毕 → 自动跑 interview-first
+  // 已有挖掘历史的项目（用户后续返回）走「重新挖掘」按钮手动触发
   if (!resumed && project.value && project.value.status !== 'completed' && !isReadonly.value) {
-    // 仅 mining 模式自动；agent_sdk 模式由用户手动点按钮
     (async () => {
       try { await uploadPromise; } catch (e: any) {
         console.warn('[upload wait]', e?.message || e);
@@ -271,12 +250,13 @@ onMounted(async () => {
       await new Promise(r => setTimeout(r, 100));
       if (!chatRef.value || chat.streaming) return;
       const hasUserMsg = chat.messages.some(m => m.role === 'user');
+      const hasAgentMsg = chat.messages.some(m => m.role === 'agent' && (m.content || '').trim());
+      if (hasUserMsg || hasAgentMsg) return;   // 已有挖掘历史：不自动重跑
       if (ui.agentMode === 'agent_sdk') {
-        // agent_sdk: 等用户点"开始挖掘"按钮，这里啥都不做
-        return;
-      }
-      if (hasUserMsg) return;   // 老 mining 模式：有用户消息说明已挖过，不重跑
-      {
+        chatRef.value.startFirstInterview().catch((e: any) => {
+          console.warn('[auto startInterview on enter] failed:', e?.message || e);
+        });
+      } else {
         const ctx = {
           title: project.value!.title,
           domain: project.value!.domain,
@@ -313,12 +293,6 @@ function onRoundComplete() {
       <a-button v-if="!isReadonly && project && ui.agentMode === 'agent_sdk' && hasMiningHistory"
                 size="small" :loading="restartMining"
                 @click="restartFromScratch">🔄 重新挖掘</a-button>
-      <a-button v-if="!isReadonly && project"
-                size="small"
-                :type="chat.readyForDocx ? 'primary' : 'default'"
-                :loading="generating"
-                :class="{ 'pp-btn-docx-ready': chat.readyForDocx }"
-                @click="generateDisclosureDocx">🎯 生成交底书 .docx</a-button>
     </span>
   </div>
 

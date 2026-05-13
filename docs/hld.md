@@ -1,6 +1,6 @@
-# patent_king 高层设计文档
+# PatentlyPatent 高层设计文档
 
-> 更新于 2026-05-12 · 关联：[prd.md](./prd.md) · [deploy_runbook.md](./deploy_runbook.md) · [user_guide.md](./user_guide.md)
+> 更新于 2026-05-13 · 关联：[prd.md](./prd.md) · [deploy_runbook.md](./deploy_runbook.md) · [user_guide.md](./user_guide.md)
 
 ---
 
@@ -42,7 +42,7 @@ graph TD
     USER([员工 / 工程师<br/>提交 idea])
     ADMIN([管理员<br/>看 Dashboard / 调参])
 
-    SYS[<b>patent_king</b><br/>企业自助 AI 专利挖掘系统<br/>blind.pub/patent]
+    SYS[<b>PatentlyPatent</b><br/>企业自助 AI 专利挖掘系统<br/>blind.pub/patent]
 
     ZHY[(智慧芽 OpenAPI<br/>专利检索 / 申请人 / 趋势)]
     ANTH[(Anthropic Claude<br/>via bundled claude CLI<br/>OAuth credentials)]
@@ -152,15 +152,19 @@ graph TB
     subgraph AgentCore[Agent 核心]
         A_INTV[agent_interview.py<br/>interview-first 状态机]
         A_SEC[agent_section_demo.py<br/>5 节 section prompts]
-        A_SPIKE[agent_sdk_spike.py<br/>SDK 适配 + SSE 翻译]
-        A_MINING[mining.py<br/>v0.36 已降级为兼容层]
+        A_SPIKE[agent_sdk_spike.py<br/>SDK 适配 + SSE 翻译 + MCP 装配]
+        A_MINING[mining.py<br/>兼容层 + legacy fallback]
     end
 
-    subgraph MCP[in-process MCP Tools n=12]
-        T_ZHY[智慧芽 ×5<br/>search/count/trends/<br/>applicants/landscape]
+    subgraph MCP[MCP 工具]
+        T_REMOTE_LOGIC[A 路 Zhihuiya logic-mcp ×2<br/>patsnap_search / patsnap_fetch<br/>HTTP streamable，收费]
+        T_REMOTE_MAIN[A 路 Zhihuiya main-mcp ×17<br/>分类号 / 同义词扩展 / 申请人 / 图像 / 嵌套<br/>HTTP streamable，收费]
+        T_BQ[B 路 BigQuery ×2<br/>bq_search_patents / bq_patent_detail<br/>免费，CN 全量降级备选]
+        T_ZHY[in-house 智慧芽 ×5<br/>search/count/trends/applicants/legal]
         T_KB[kb ×2<br/>kb_search / kb_read]
         T_FILES[project files ×4<br/>file_read / file_write_section<br/>file_list / file_delete]
         T_PLAN[update_plan ×1<br/>派生 plan 卡片]
+        T_WEB[WebSearch / WebFetch ×2<br/>Claude Code 内置]
     end
 
     subgraph Infra[基础设施]
@@ -191,13 +195,15 @@ graph TB
 
 **核心组件职责**：
 
-| 组件 | 职责 | v0.36 关键变化 |
-| --- | --- | --- |
-| `agent_interview.py` | interview-first 状态机驱动；多轮问答 → 触发写作 | **v0.36 新增**，主流程入口 |
-| `agent_section_demo.py` | 5 节 section_prompt 模板 + `mine_section_via_agent` | 被 interview "ready_for_write" 状态调用 |
-| `agent_sdk_spike.py` | `claude-agent-sdk` 适配层；SDK 事件 → SSE 翻译；MCP server 装配 | 删除全部 mock；启动期校验 CLI |
-| `mining.py` | 老路径兼容；保留 `_legacy` 函数供 admin 回归测试 | v0.36 主流程不再调用 |
-| `budget.py` / `concurrency.py` | 日预算 + SSE 并发 | 接入 interview/mine_full 双入口 |
+| 组件 | 职责 |
+| --- | --- |
+| `agent_interview.py` | interview-first 状态机驱动；多轮问答 → 触发写作；主流程入口；装配 in-process + remote MCP 服务 |
+| `agent_section_demo.py` | 5 节 section_prompt 模板 + `mine_section_via_agent`；被 interview「ready_for_write」状态调用 |
+| `agent_sdk_spike.py` | `claude-agent-sdk` 适配层；SDK 事件 → SSE 翻译；in-process MCP server 装配（智慧芽 in-house + kb + project files + update_plan + BigQuery 降级路） |
+| `patents_bq.py` | Google Patents BigQuery adapter（B 路降级）；`is_available()` 检测凭证，缺则工具不暴露给 agent，行为静默回退 |
+| `zhihuiya.py` | 智慧芽 in-house REST 封装（query-search-count / insights/* / simple-legal-status 等）；TTL cache 10s |
+| `mining.py` | legacy 占位骨架兜底；agent 失败时 `AgentRunLog.fallback=True` |
+| `budget.py` / `concurrency.py` | 日预算 + SSE 并发；接入 interview/mine_full 双入口 |
 
 ---
 
@@ -331,32 +337,41 @@ graph TB
     P --> S[本系统文档 readonly /<br/>source=system]:::s
     P --> I[.ai-internal /<br/>source=system hidden=true]:::i
 
-    U --> U1[idea.md 报门]
-    U --> U2[uploaded.pdf 拖拽]
+    U --> U1[0-报门.md 系统自动落地]
+    U --> U2[uploaded.pdf/pptx/docx/xlsx 拖拽]
 
-    A --> A1[01-背景技术.md]
-    A --> A2[02-技术问题.md]
-    A --> A3[03-技术方案.md]
-    A --> A4[04-技术效果.md]
-    A --> A5[05-实施例.md]
-    A --> A6[交底书_v1.docx]
+    A --> A1[prior_art.md]
+    A --> A2[summary.md]
+    A --> A3[embodiments.md]
+    A --> A4[claims.md]
+    A --> A5[drawings_description.md]
+    A --> A6[调研下载/类似专利/...]
+    A --> A7[交底书.docx 导出]
 
-    S --> S1[使用教程.md]
-    S --> S2[模板/No.34.docx]
+    S --> S1[1-使用说明.md]
+    S --> S2[2-产品需求文档 PRD.md]
+    S --> S3[3-系统设计文档 HLD.md]
+    S --> S4[4-部署运维手册.md]
 
-    I --> I1[_interview/<br/>历轮问答存档]
-    I --> I2[_compare/<br/>A/B 对比]
-    I --> I3[_plan/<br/>update_plan 快照]
+    I --> I1[_compare/full/ mineFull 落地]
+    I --> I2[_compare/ A/B 对比]
 ```
 
 **根文件夹权限矩阵**：
 
-| 文件夹 | source | hidden | 用户写 | agent 写 | 用户读 | UI 默认显示 |
+| 文件夹 | source | hidden | readonly | 用户写 | agent 写 | UI |
 | --- | --- | --- | --- | --- | --- | --- |
-| 我的资料/ | user | false | 是 | 否 | 是 | 是 |
-| AI 输出/ | ai | false | 否（除"接受/拒绝"操作） | 是 | 是 | 是 |
-| 本系统文档/ | system | false | 否（只读模板） | 否 | 是 | 是 |
-| .ai-internal/ | system | true | 否 | 是 | admin only | 否 |
+| 📁 我的资料/ | user | false | false | 是 | 否（但 agent 可 read_user_file） | 是 |
+| 📁 AI 输出/ | ai | false | false | 是 | 是 | 是 |
+| 📖 本系统文档/ | system | false | **true** | 否 | 否 | 是（🔒 移到末尾，紧贴 kb） |
+| .ai-internal/ | system | **true** | false | 否 | 是 | 否（admin only） |
+
+**实现细节**：
+- `FileNode.readonly: bool`
+- 后端 `_is_readonly_ancestor()` 向上遍历 parent_id，命中 readonly 即拒；`create_file / update_file / delete_file / upload_file` 全检查
+- 前端 FileTree `isReadonlyTree()` 同步守护，UI 弹"只读"提示
+- `system_docs.py` 启动期幂等 `backfill_all_projects()`：4 个白名单 md 自动同步到每个项目根；docs/ 任一文件改了 → 重启 backend 自动推到所有项目
+- `0-报门.md`：create_project 时由 title/description/intake_json 拼成 markdown 自动落「我的资料/」，让员工和 agent 都看得到
 
 **虚拟节点（不入库）**：
 
@@ -382,31 +397,34 @@ graph LR
     S --> CTL[控制级]:::ctl
     S --> PLAN[计划级]:::plan
 
-    TOK --> E1[thinking<br/>delta text 增量]
-    TOK --> E2[delta<br/>assistant text 增量]
+    TOK --> E1[thinking<br/>系统状态卡片]
+    TOK --> E2[delta<br/>token 级文本流]
 
-    TOOL --> E3[tool_use<br/>name + input + tool_use_id]
-    TOOL --> E4[tool_result<br/>tool_use_id + result 截断]
+    TOOL --> E3[tool_use<br/>name + input + id]
+    TOOL --> E4[tool_result<br/>tool_use_id + text + is_error]
 
-    CTL --> E5[done<br/>num_turns cost stop_reason]
-    CTL --> E6[error<br/>message + fallback_used]
+    CTL --> E5[done<br/>stop_reason cost usage]
+    CTL --> E6[error<br/>message]
 
-    PLAN --> E7[update_plan<br/>原始 tool_use 镜像]
-    PLAN --> E8[plan<br/>派生卡片 渲染用]
+    PLAN --> E7[update_plan<br/>MCP 工具调用]
+    PLAN --> E8[harness 派生<br/>step_done / step_failed]
 ```
 
 ### 4.2 事件 schema 详表
 
-| event | 关键字段 | 来源 | 前端处理 |
+| event | 字段 | 来源 | 前端处理 |
 | --- | --- | --- | --- |
-| `thinking` | `{ text: string }` | SDK `StreamEvent` 中 `thinking_delta` | 灰色斜体气泡，可折叠 |
-| `tool_use` | `{ tool_use_id, name, input, t0 }` | SDK `AssistantMessage.tool_use_block` | 工具卡 header（pending） |
-| `tool_result` | `{ tool_use_id, result, is_error, duration_ms }` | SDK `UserMessage.tool_result_block` | 工具卡 body，按 `tool_use_id` 配对 |
-| `delta` | `{ text }` | SDK `partial_message` text chunk | assistant 气泡内 token 流追加 |
-| `done` | `{ num_turns, total_cost_usd, stop_reason, cache_creation_tokens, cache_read_tokens }` | SDK `ResultMessage` | 关闭流，更新 run log |
-| `error` | `{ message, fallback_used, code }` | try/except | 红色 alert，触发降级 |
-| `update_plan` | `{ tool_use_id, plan: [{step, status, eta}] }` | MCP tool `update_plan` 调用镜像 | 透传 |
-| `plan` | `{ items: [{step, status, eta}], rev }` | 由 `update_plan` 派生（去重 + 单调 rev） | 顶部进度条卡片 |
+| `thinking` | `{ text }` | 后端调度推送 | 浅灰斜体行（折叠到调研过程组） |
+| `delta` | `{ text }` | SDK `StreamEvent.content_block_delta.text_delta` | agent 气泡 token 增量 + 检测 `[READY_FOR_WRITE]` / `[READY_FOR_DOCX]` |
+| `tool_use` | `{ id, name, input }` | SDK `AssistantMessage.ToolUseBlock` | 调研过程组内一行工具卡（pending） |
+| `tool_result` | `{ tool_use_id, text, is_error }` | SDK `UserMessage.ToolResultBlock` | 按 id 配对挂到对应工具卡 |
+| `done` | `{ stop_reason, num_turns, total_cost_usd, usage }` | SDK `ResultMessage` | endAgent；stop_reason=`tool_use` 时提示用户继续 |
+| `error` | `{ message }` | try/except | 红色 alert |
+| `update_plan` | `{ name: 'mcp__patent-tools__update_plan', input.steps_json }` | MCP tool 镜像 | 前端 parse steps_json → chat.setPlan() |
+| **`step_done`** ★ | `{ content: '✓ <title>' }` | **harness** chat.setPlan diff 检测 | 绿色左边轻量气泡，独立于工具卡组 |
+| **`step_failed`** ★ | `{ content: '✗ <title>' }` | harness 同上 | 红色左边轻量气泡 |
+
+★ harness 派生：前端 `setPlan(newSteps)` 时对比旧 plan，状态变 `completed`/`failed` 自动 push 系统消息 —— **不依赖 LLM 自觉叙述**，工程层保证可见性。
 
 ### 4.3 关键约束
 
@@ -554,70 +572,116 @@ stateDiagram-v2
 
 ## 7. MCP 工具拓扑
 
-### 7.1 12 个工具全景
+### 7.1 工具全景
 
 ```mermaid
 graph TB
-    classDef zhy fill:#dbeafe,stroke:#1d4ed8
-    classDef kb fill:#fef3c7,stroke:#d97706
-    classDef file fill:#dcfce7,stroke:#16a34a
-    classDef plan fill:#fce7f3,stroke:#db2777
+    classDef remote fill:#dbeafe,stroke:#1d4ed8,color:#1e3a8a
+    classDef bq fill:#fef3c7,stroke:#d97706,color:#78350f
+    classDef inhouse fill:#e0e7ff,stroke:#4f46e5,color:#312e81
+    classDef web fill:#fed7aa,stroke:#ea580c,color:#7c2d12
+    classDef kb fill:#fce7f3,stroke:#db2777,color:#831843
+    classDef file fill:#dcfce7,stroke:#16a34a,color:#14532d
+    classDef plan fill:#fef9c3,stroke:#ca8a04,color:#713f12
 
-    AGENT[claude-agent-sdk<br/>opus-4-7]
+    AGENT[claude-agent-sdk · opus-4-7<br/>include_partial_messages=True<br/>resolved by claude CLI OAuth]
 
-    subgraph ZhyTools[智慧芽 ×5]
-        T1[search_count<br/>q → hits]:::zhy
-        T2[search_trends<br/>q → 7年趋势]:::zhy
-        T3[search_applicants<br/>q → top 申请人]:::zhy
-        T4[search_landscape<br/>q → 综合地形]:::zhy
-        T5[search_patents<br/>q → 标题/摘要列表]:::zhy
+    subgraph ARoute["A 路：智慧芽托管 MCP（首选，HTTP streamable，收费）"]
+        LOGIC[logic-mcp ×2<br/>patsnap_search 关键词/语义检索<br/>patsnap_fetch 拉权要/法律/同族]:::remote
+        MAIN[main-mcp ×17<br/>分类号助手 / 同义词扩展 / 申请人<br/>语义/图像/嵌套/相似公开号]:::remote
     end
 
-    subgraph KbTools[知识库 ×2]
-        T6[kb_search<br/>关键词 → 命中文件]:::kb
-        T7[kb_read<br/>path → 全文]:::kb
+    subgraph BRoute["B 路：BigQuery 降级备选（免费，公开数据集）"]
+        BQ1[bq_search_patents<br/>Google Patents · CN 全量<br/>关键词+国别+年份]:::bq
+        BQ2[bq_patent_detail<br/>权要/说明书/IPC/引证]:::bq
     end
 
-    subgraph FileTools[项目文件 ×4]
-        T8[file_read<br/>file_id → content]:::file
-        T9[file_write_section<br/>section + md → FileNode]:::file
-        T10[file_list<br/>project → tree]:::file
-        T11[file_delete<br/>file_id]:::file
+    subgraph InhouseZhy[in-house 智慧芽 REST 兜底 ×5]
+        IH1[search_patents 命中量]:::inhouse
+        IH2[search_trends 近 10 年]:::inhouse
+        IH3[search_applicants Top]:::inhouse
+        IH4[inventor_ranking Top]:::inhouse
+        IH5[legal_status 单件法律状态]:::inhouse
     end
 
-    subgraph PlanTools[计划 ×1]
-        T12[update_plan<br/>items[] → 派生 plan 卡]:::plan
+    subgraph Web[Web 通用 ×2 SDK 内置]
+        W1[WebSearch]:::web
+        W2[WebFetch URL → 正文]:::web
     end
 
-    AGENT --> T1 & T2 & T3 & T4 & T5
-    AGENT --> T6 & T7
-    AGENT --> T8 & T9 & T10 & T11
-    AGENT --> T12
+    subgraph KbT[本地知识库 ×2]
+        K1[search_kb 419 篇 CN 实务]:::kb
+        K2[read_kb_file 全文]:::kb
+    end
 
-    T1 & T2 & T3 & T4 & T5 --> ZHY[(智慧芽 OpenAPI)]
-    T6 & T7 --> KBFS[(refs/专利专家知识库/)]
-    T8 & T9 & T10 & T11 --> DB[(SQLite FileNode)]
-    T12 --> EV[(AGENT_EVENT)]
+    subgraph FileT[项目文件 ×4]
+        F1[read_user_file<br/>PDF/pptx/docx/xlsx/xls/text<br/>真提文本 + DB 缓存]:::file
+        F2[file_search_in_project]:::file
+        F3[file_write_section md → AI 输出/]:::file
+        F4[save_research → 调研下载/]:::file
+    end
+
+    subgraph PlanT[计划 ×1]
+        P1[update_plan steps[] → harness 派生汇报]:::plan
+    end
+
+    AGENT --> LOGIC & MAIN
+    AGENT -. A 业务错时回退 .-> BQ1 & BQ2
+    AGENT --> IH1 & IH2 & IH3 & IH4 & IH5
+    AGENT --> W1 & W2
+    AGENT --> K1 & K2
+    AGENT --> F1 & F2 & F3 & F4
+    AGENT --> P1
+
+    LOGIC & MAIN --> ZHY[(智慧芽 connect.zhihuiya.com<br/>apikey in URL)]
+    BQ1 & BQ2 --> BQ[(bigquery.googleapis.com<br/>patents-public-data<br/>service-account JSON)]
+    IH1 & IH2 & IH3 & IH4 & IH5 --> ZHY_REST[(智慧芽 REST<br/>connect.zhihuiya.com<br/>Bearer token)]
+    W1 & W2 --> NET[(公网)]
+    K1 & K2 --> KBFS[(refs/专利专家知识库/)]
+    F1 & F2 & F3 & F4 --> DB[(SQLite FileNode)]
+    P1 -.setPlan diff.-> CHAT[(前端 step_done)]
 ```
 
 ### 7.2 工具规约
 
-| # | 工具 | 输入 | 输出 | 副作用 | 上下文注入 |
-| --- | --- | --- | --- | --- | --- |
-| 1 | `search_count` | `q: str` | `{hits: int}` | 智慧芽 quota -1 | - |
-| 2 | `search_trends` | `q, years?` | `[{year, count}]` | quota -1 | - |
-| 3 | `search_applicants` | `q, top?` | `[{name, count}]` | quota -1 | - |
-| 4 | `search_landscape` | `q` | 综合 json | quota -1 | - |
-| 5 | `search_patents` | `q, limit?` | 列表 | quota -1 | - |
-| 6 | `kb_search` | `q, top?` | `[{path, snippet}]` | - | - |
-| 7 | `kb_read` | `path: str` | `{content: str}` | 路径白名单校验 | - |
-| 8 | `file_read` | `file_id` | `{content}` | - | **project_id** |
-| 9 | `file_write_section` | `section, content` | `{file_id}` | INSERT FileNode | **project_id** |
-| 10 | `file_list` | - | tree | - | **project_id** |
-| 11 | `file_delete` | `file_id` | `{ok}` | DELETE FileNode | **project_id** |
-| 12 | `update_plan` | `items: list[Step]` | `{rev}` | INSERT AGENT_EVENT | **run_id** |
+| # | 工具 | 输入 | 输出 | 副作用 / 上下文 |
+| --- | --- | --- | --- | --- |
+| **A 路 — 智慧芽托管 MCP（HTTP streamable，apikey 在 URL）** ||||
+| A1 | `patsnap_search` | `keywords / 语义 query / 字段过滤` | 命中量 + 命中专利数组（公开号/标题/摘要/相似度） | quota -1 |
+| A2 | `patsnap_fetch` | `publication_number` | 权要 / 法律状态 / 同族 | quota -1 |
+| A3 | `search_patent_count` | 布尔检索式 | 命中量 | quota -1 |
+| A4 | `suggest_keywords` | `seed keyword` | 同义词/上下位扩展 | quota -1 |
+| A5 | `query_classification_helper` / `search_classification_helper` | 关键词 → IPC/CPC | 分类号列表 | quota -1 |
+| A6 | `search_patents_by_(original/current)_assignee` / `search_patents_by_semantic` / `search_similar_patents_by_pn` / `search_patent_field` / `search_patent_by_pn` / `search_patents_nested` / `search_defense_patents` | 多维 query | 专利列表 | quota -1 |
+| A7 | `image_search_*` ×4 | 图片/URL | 相似图像专利 | quota -1 |
+| **B 路 — BigQuery 降级备选（A 路业务错时使用）** ||||
+| B1 | `bq_search_patents` | `keyword, country=CN, year_from=2020, limit≤50` | `[{publication_number, title_zh, abstract_zh, assignee, filing_date, country_code}]` | BigQuery slot；按扫描字节计费（免费层 1TB/月） |
+| B2 | `bq_patent_detail` | `publication_number` | title/abstract/claims/description/assignee/ipc/citations 中文 | 同上；description ≤8000 字、claims ≤4000 字截断 |
+| **in-house 智慧芽 REST 兜底** ||||
+| C1 | `search_patents` | `query: str` | 命中量 | REST `/query-search-count` |
+| C2 | `search_trends` | `query, lang?` | `[{year, count}]` × 10 | REST `/insights/trends` |
+| C3 | `search_applicants` | `query, lang?` | `[{name, count}]` × 10 | REST `/insights/applicant-ranking` |
+| C4 | `inventor_ranking` | `query, lang?` | `[{name, count}]` × 10 | REST `/insights/inventor-ranking` |
+| C5 | `legal_status` | 公开号 | 有效/失效/审查中 | REST `/simple-legal-status` |
+| **Web / KB / 项目文件 / 计划** ||||
+| D1 | `WebSearch` | `query` | 网页结果 | Claude Code 内置 |
+| D2 | `WebFetch` | `url, prompt` | 抓取 + LLM 总结 | Claude Code 内置 |
+| D3 | `search_kb` | `keyword` | `[{path, title, snippet}]` × 5 | 模糊匹配文件名 + 正文 |
+| D4 | `read_kb_file` | `path` | 全文 ≤30000 字 | 路径白名单 |
+| D5 | `read_user_file` | `project_id, name` | 文本 ≤30000 字 | DB content 空时 file_extract 实时提取（PDF/pptx/docx/xlsx/xls）+ 回写缓存 |
+| D6 | `file_search_in_project` | `project_id, keyword` | `[{file_id, name, snippet}]` × 5 | content LIKE |
+| D7 | `file_write_section` | `project_id, name, content, parent_folder?` | `{file_id, path}` | INSERT FileNode |
+| D8 | `save_research` | `project_id, name, content, category, source_url?` | `{file_id, path}` | INSERT 「AI 输出/调研下载/<分类>/」 |
+| D9 | `update_plan` | `steps_json: str` | `{steps}` | harness 前端 diff 派生 step_done/step_failed |
 
-**project_id 注入**：通过 closure 在 `create_sdk_mcp_server()` 创建时绑定，避免 LLM 误传他人项目。
+### 7.3 关键约定
+
+- **A 路优先 + B 路自动降级**：SYSTEM_PROMPT 显式约束「`patsnap_search` 业务错（67200004/05）时立即切 `bq_search_patents`，不要反复重试」。
+- **B 路凭证就位检测**：`patents_bq.is_available()` 校验 `GOOGLE_APPLICATION_CREDENTIALS` + `BQ_BILLING_PROJECT`，缺则不向 agent 暴露 B 工具（行为静默回退到 A）。
+- **效率铁律**：同关键词不重复调；`suggest_keywords` 扩同义词后一次 `patsnap_search`，避免「先 count 再发愁」；4-6 次检索通常够判赛道。
+- **project_id 注入**：interview 路由把 `project_id` 拼到 user_msg 末尾，避免 LLM 误传他人项目。
+- **readonly 守护**：所有写操作（file_write_section / save_research / 上层 routes/files.py）调 `_is_readonly_ancestor()` 检测，命中 403。
+- **配额可见**：A 路 `67200005 Insufficient balance` 上抛让 LLM 看见，不吞 fallback 误判蓝海。
 
 ---
 
@@ -646,9 +710,9 @@ graph TB
         subgraph FsLayer[本地文件]
             DBF[(patentlypatent.db<br/>WAL + indices)]:::fs
             CRED[(/root/.claude/.credentials.json<br/>OAuth)]:::fs
-            SECRETS[(.secrets/zhihuiya.env<br/>ZHIHUIYA_TOKEN)]:::fs
+            SECRETS[(.secrets/zhihuiya.env<br/>ZHIHUIYA_TOKEN + MCP URLs)]:::fs
+            GCP[(.secrets/gcp-bq.json<br/>BigQuery service account)]:::fs
             KBR[(refs/专利专家知识库/<br/>419 md 92.7MB 只读)]:::fs
-            ARCHIVE[(docs/archive/<br/>历史版本)]:::fs
         end
 
         CLI_SUB[claude CLI subprocess<br/>bundled w/ claude-agent-sdk]:::sd
@@ -676,7 +740,8 @@ graph TB
 | `/var/www/patent/` | Vite build dist 同步目标 |
 | `/root/.claude/.credentials.json` | claude CLI OAuth（**严禁入 git**，备份 `.bak.vN`） |
 | `backend/patentlypatent.db` | SQLite 主库（每日 cron 备份 → `.bak.YYYYMMDD`） |
-| `.secrets/zhihuiya.env` | 智慧芽 token（systemd `EnvironmentFile=`） |
+| `.secrets/zhihuiya.env` | 智慧芽 REST token + 托管 MCP URLs（systemd `EnvironmentFile=`） |
+| `.secrets/gcp-bq.json` | BigQuery service account JSON；env `GOOGLE_APPLICATION_CREDENTIALS` + `BQ_BILLING_PROJECT` 注入 |
 
 **部署 SOP** 详见 [`docs/deploy_runbook.md`](./deploy_runbook.md)。
 
@@ -688,7 +753,7 @@ graph TB
 | --- | --- | --- |
 | **认证 - JWT** | HS256 + 服务端 secret + 过期时间；axios interceptor 自动加 Bearer | `routes/auth.py` |
 | **认证 - CAS** | `/p3/serviceValidate` XML，`defusedxml` 防 XXE | `routes/auth_cas.py` |
-| **真账密** | bcrypt password_hash；fixture u1/u2 仅 demo | `models.User` |
+| **真账密** | bcrypt password_hash；fixture u1/u2 仅 demo（待真员工库替换） | `models.User` |
 | **授权** | role-based：`role in {employee, admin}`；admin 路由 dependency 校验 | `routes/admin.py` |
 | **SSE 限流** | `asyncio.Semaphore(5)`；超限 503 `SSE_BUSY` | `concurrency.py` |
 | **日预算阻断** | 每次 update_after_run 聚合；≥ $10 拒新 SSE | `budget.py` |
@@ -704,20 +769,34 @@ graph TB
 
 ## 10. 可观测性
 
-### 10.1 AgentRunLog 关键字段
+### 10.1 启动期自检
 
-| 字段 | 说明 | 来源 |
-| --- | --- | --- |
-| `run_id` | UUID | 创建 run 时生成 |
-| `endpoint` | `interview` / `mine_full` / `chat` | 入口 router |
-| `model` | `claude-opus-4-7` / `claude-sonnet-4-6` | ClaudeAgentOptions |
-| `num_turns` | SDK ResultMessage | `result.num_turns` |
-| `total_cost_usd` | float | `result.total_cost_usd` |
-| `cache_creation_tokens` / `cache_read_tokens` | int | `result.usage` |
-| `stop_reason` | `end_turn` / `max_turns` / `error` | SDK |
-| `fallback_used` | bool | catch 块标记 |
-| `duration_ms` | int | started_at 与 ended_at 差 |
-| `error` | text | exception str（脱敏） |
+```python
+# main.py lifespan
+1. init_db() + seed_users
+2. system_docs.backfill_all_projects()      # 28+ 项目同步本系统文档 + 0-报门.md
+3. 清理僵死 AgentRun：所有 status='running' 标 cancelled（systemd 重启后旧 task 已死）
+4. assert_claude_cli_available()            # 硬校验 claude CLI 可用，缺则启动失败
+5. agent_sdk_spike.log_startup_status()     # 输出 claude_cli=/path / model / 智慧芽 + BigQuery 凭证状态
+```
+
+启动日志样例：
+```
+system_docs: backfilled 28 projects
+marked 1 stale running AgentRun as cancelled (systemd restart)
+startup ok | claude_cli=.../bundled/claude | use_real_zhihuiya=True | model=claude-opus-4-7
+```
+
+### 10.2 AgentRunLog 关键字段
+
+| 字段 | 说明 |
+| --- | --- |
+| `run_id` | UUID |
+| `endpoint` | `interview` / `mine_full` / `mine_spike` / `chat` / `ab_compare` |
+| `num_turns` / `total_cost_usd` / `stop_reason` / `duration_ms` | SDK ResultMessage 透传 |
+| `cache_creation_input_tokens` / `cache_read_input_tokens` | prompt cache 命中（实测 60% 节省） |
+| `fallback_used` | True 表示 agent 失败兜底到 legacy 占位骨架（监控 < 30%） |
+| `error` | exception str（脱敏） |
 
 ### 10.2 admin Dashboard 看板
 
@@ -755,7 +834,7 @@ graph LR
 | **kb 单文件上限** | 5MB | `routes/kb.py` | 413 + "原文件直链"兜底 |
 | **SQLite 并发** | WAL + synchronous=NORMAL + 64MB cache | `db.py` | 短事务 + asyncio.to_thread 避免阻塞 |
 | **SSE 单帧大小** | tool_result ≤ 32KB | 序列化前截断 | `truncated=true` + 原文落盘 |
-| **prompt cache** | `SystemPromptPreset(exclude_dynamic_sections=True)` | 实测 cache_read 命中 60%+ | 详见 `prompt_cache_research.md` |
+| **prompt cache** | `SystemPromptPreset(exclude_dynamic_sections=True)` | 实测 cache_read 命中 60%+ | system_prompt 不随 user 变 |
 
 ---
 
@@ -763,54 +842,32 @@ graph LR
 
 | # | 风险 | 影响 | 缓解 |
 | --- | --- | --- | --- |
-| R-1 | **claude CLI OAuth 凭证过期**（30+ 天） | agent 路径全挂；v0.36 启动期硬校验失败 → 服务拒启 | 监控 `journalctl` 启动失败；deploy_runbook 续期 SOP；备份 `.credentials.json.bak.vN`；监控 `agent_runs.fallback_used` 上升 |
-| R-2 | **智慧芽 quota 月度耗尽** | 5 个 search 工具返空 | `_safe_query` 4 场景兜底 + LRU TTL cache 300s；admin Dashboard 看 fallback；可临时切 kb 主导 |
-| R-3 | **SDK 版本升级 (`claude-agent-sdk` upgrade)** | 字段重命名 / 事件类型变化打破 SSE 翻译层 | 版本锁定 `pyproject.toml`；升级先在 `agent_sdk_spike.py` 走"真路径冒烟"；保留 `mining.py` 兼容层作回退 |
-| R-4 | **并发 SSE 资源耗尽** | 同 host CPU/连接堆积 | Semaphore=5 硬上限；nginx `proxy_read_timeout 600s`；客户端 AbortController 优雅取消 |
-| R-5 | **prompt cache 跨用户穿透** | 同 idea 不同 user 共享 cache（数据隔离薄） | system_prompt 不带 user 信息；多租户隔离列入 v0.40 |
-| R-6 | **SQLite 单机锁竞争** | mine_full 并发 5 时偶尔 BUSY | WAL + 短事务 + asyncio.to_thread；硬上限 Semaphore(5) |
-| R-7 | **tool 描述变更打破 cache** | cost 抖动 | 工具描述集中在 `agent_sdk_spike.py`，version 锁；改动后 cost 时序图能立刻看到 |
-| R-8 | **interview-first 死循环**（agent 永远不进 ready_for_write） | 用户等不到写作 | `max_turns=8` 兜底；UI 提供"强制进入写作"按钮；启发式：≥ 3 轮 + intake_json 覆盖 5 字段 → 自动推进 |
-| R-9 | **大 PDF kb 预览失败** | 用户体验差 | 5MB 上限提示 + 直链兜底；v0.40 加分页 |
-| R-10 | **单点机器宕机** | 全员不可用 | systemd auto-restart；sqlite WAL 易备份；cron 备份（v0.37 落地） |
-| R-11 | **SSE 连接被中间代理拆** | chat 卡顿 / 截断 | nginx `proxy_buffering off`；前端 `Last-Event-ID` 断线重连 |
-| R-12 | **docx 模板偏移** | 代理所返工 | 严格按 No.34 模板 9 章节；e2e 验证 `file` 命令返 "Microsoft Word 2007+" |
+| R-1 | **claude CLI OAuth 凭证过期**（30+ 天） | agent 路径全挂；启动期硬校验失败 → 服务拒启 | 监控 `journalctl` 启动失败；deploy_runbook 续期 SOP；备份 `.credentials.json.bak.vN`；监控 `agent_runs.fallback_used` 上升 |
+| R-2 | **智慧芽 quota 月度耗尽 / 业务错** | A 路 search 工具不可用 | SYSTEM_PROMPT 引导切 B 路 BigQuery；in-house REST `_safe_query` 4 场景兜底 + LRU TTL cache 300s；admin Dashboard 看 fallback |
+| R-3 | **BigQuery 凭证 / API 未启用** | B 路降级不可用 | `is_available()` 静默回退到 A 路；启动日志显式打印凭证就位状态；deploy_runbook 含 GCP 启用步骤 |
+| R-4 | **SDK 版本升级** | 字段重命名 / 事件类型变化打破 SSE 翻译层 | 版本锁定 `pyproject.toml`；升级先在 dev 跑真路径冒烟；保留 `mining.py` 兼容层作回退 |
+| R-5 | **并发 SSE 资源耗尽** | 同 host CPU/连接堆积 | Semaphore=5 硬上限；nginx `proxy_read_timeout 600s`；客户端 AbortController 优雅取消 |
+| R-6 | **prompt cache 跨用户穿透** | 同 idea 不同 user 共享 cache（数据隔离薄） | system_prompt 不带 user 信息；多租户隔离列入远景 |
+| R-7 | **SQLite 单机锁竞争** | mine_full 并发 5 时偶尔 BUSY | WAL + 短事务 + asyncio.to_thread；硬上限 Semaphore(5) |
+| R-8 | **tool 描述变更打破 cache** | cost 抖动 | 工具描述集中在 `agent_sdk_spike.py`；改动后 cost 时序图能立刻看到 |
+| R-9 | **interview-first 死循环**（agent 永远不进 ready_for_write） | 用户等不到写作 | `max_turns=8` 兜底；UI 提供「强制进入写作」按钮；启发式：≥ 3 轮 + intake_json 覆盖 5 字段 → 自动推进 |
+| R-10 | **大 PDF kb 预览失败** | 用户体验差 | 5MB 上限提示 + 直链兜底 |
+| R-11 | **单点机器宕机** | 全员不可用 | systemd auto-restart；sqlite WAL 易备份；cron 备份（P1） |
+| R-12 | **SSE 连接被中间代理拆** | chat 卡顿 / 截断 | nginx `proxy_buffering off`；前端 `Last-Event-ID` 断线重连 |
+| R-13 | **docx 模板偏移** | 代理所返工 | 通用 5 章结构；e2e 验证 `file` 命令返 "Microsoft Word 2007+" |
 
 ---
 
 ## 13. 演进路径
 
-```mermaid
-gantt
-    title patent_king 演进路线
-    dateFormat YYYY-MM-DD
-    section v0.36 当前
-    interview-first 主线 :done, 2026-05-01, 12d
-    全 mock 删除 + 启动硬校验 :done, 2026-05-05, 5d
-    section v0.37 短期
-    SSE 断线重连 Last-Event-ID :2026-05-13, 7d
-    cron sqlite 备份 :2026-05-15, 3d
-    Sentry SDK 接入 :2026-05-18, 5d
-    section v0.38 中期
-    数据源 adapter（CNIPA + Google BigQuery） :2026-05-25, 14d
-    Subagent for prior_art 深挖 :2026-06-01, 10d
-    section v0.39
-    多租户隔离 prompt cache tenant_id :2026-06-12, 10d
-    企业 GitLab/Confluence kb 接入 :2026-06-18, 10d
-    section v0.40
-    全 agent 自驱去除 mining 兼容层 :2026-06-25, 14d
-    移动端 + a11y 完整支持 :2026-07-05, 10d
-```
-
-**关键里程碑**：
-
-| 版本 | 主题 | 退出条件 |
-| --- | --- | --- |
-| v0.36（当前） | interview-first 全量上线 | 真用户 N ≥ 20 / 凭证 30 天稳定 / fallback < 30% |
-| v0.37 | 可观测性补齐 | SSE 重连可用 / Sentry 上报 / 备份恢复演练 1 次 |
-| v0.38 | 数据源 + Subagent | adapter 至少 2 个能用 / Subagent 召回 +20% |
-| v0.39 | 多租户 + 企业 kb | tenant_id 隔离实证 / GitLab kb 1 个团队接入 |
-| v0.40 | 第二代 agent | 删除 `mining.py` 老路径 / 移动端体验达标 |
+| 主题 | 退出条件 |
+| --- | --- |
+| **可观测性补齐** | SSE 断线重连可用 / Sentry 错误上报 / cron 备份恢复演练 1 次 |
+| **Subagent 深挖** | prior_art subagent 召回 +20% |
+| **多租户隔离** | tenant_id 维度的 prompt cache 隔离实证 |
+| **企业 kb 接入** | GitLab / Confluence 至少 1 个团队接入 |
+| **移动端 + a11y** | 375px 单栏 OK / Lighthouse a11y > 90 |
+| **多 agent 协作** | 检索 + 撰写 + 审查三角合议；删除 `mining.py` 兼容层 |
 
 ---
 

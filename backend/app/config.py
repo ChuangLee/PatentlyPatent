@@ -79,6 +79,9 @@ class Settings(BaseModel):
     zhihuiya_api_base: str = os.environ.get(
         "ZHIHUIYA_API_BASE", "https://connect.zhihuiya.com",
     )
+    # v0.38: 智慧芽托管 MCP 服务（HTTP streamable）；apikey 在 URL query 里，整 URL 视为 secret
+    zhihuiya_mcp_logic: str = os.environ.get("ZHIHUIYA_MCP_LOGIC", "")
+    zhihuiya_mcp_main: str = os.environ.get("ZHIHUIYA_MCP_MAIN", "")
 
     # 测试桩开关：仅 conftest 用来跳过启动期 CLI 校验。生产代码不读它。
     skip_cli_check: bool = os.environ.get("PP_SKIP_CLI_CHECK", "").lower() in (

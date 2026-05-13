@@ -1,6 +1,8 @@
-# PatentlyPatent 部署运维手册 (v0.21)
+# PatentlyPatent 部署运维手册
 
 > 一句话：**Vue 静态文件由 nginx 直供，FastAPI 后端走 systemd，agent 通过子进程 spawn `claude` CLI 走 OAuth 认证，数据落 SQLite WAL。** 公网入口 <https://blind.pub/patent>。
+>
+> 专利检索数据走 **A 路智慧芽托管 MCP**（首选，HTTP streamable）+ **B 路 Google BigQuery patents-public-data**（免费降级备选）。
 
 ---
 
@@ -14,7 +16,9 @@ flowchart LR
     API --> DB[(SQLite WAL<br/>backend/patentlypatent.db)]
     API -->|spawn| CLI[claude CLI<br/>子进程<br/>OAuth ~/.claude]
     CLI --> ANT[Anthropic API]
-    API -->|httpx| ZHY[智慧芽 OpenAPI]
+    CLI -->|A 路 MCP HTTP| ZHY[智慧芽 connect.zhihuiya.com<br/>logic-mcp + main-mcp]
+    CLI -.A 业务错降级.-> BQ[Google BigQuery<br/>patents-public-data]
+    API -->|in-house REST 兜底| ZHY_REST[智慧芽 REST]
 ```
 
 ---
@@ -28,7 +32,7 @@ flowchart LR
 | Python venv | `/root/ai-workspace/patent_king/backend/.venv/` |
 | SQLite DB | `/root/ai-workspace/patent_king/backend/patentlypatent.db` |
 | docx 落盘 | `/root/ai-workspace/patent_king/backend/storage/{pid}/` |
-| secrets | `.secrets/zhihuiya.env`，`.secrets/anthropic.env`（可选） |
+| secrets | `.secrets/zhihuiya.env`（REST token + 托管 MCP URLs），`.secrets/gcp-bq.json`（B 路 BigQuery service account） |
 | claude CLI 凭证 | `/root/.claude/.credentials.json` |
 
 ---
@@ -51,7 +55,23 @@ sudo systemctl edit patentlypatent-backend            # 改 override.conf
 sudo systemctl daemon-reload                          # 改完必须 reload
 ```
 
-启动期会打印：`agent_sdk_spike: use_real_llm=False has_key=False use_real_zhihuiya=True` 等环境状态，作为冒烟自检。
+启动期会打印 claude CLI 路径 / 模型 / 智慧芽凭证 / BigQuery 凭证就位状态，作为冒烟自检。
+
+**B 路 BigQuery 启用（一次性，按需）**：
+
+```bash
+# 1. 上传 GCP service account JSON 到 .secrets/gcp-bq.json，chmod 600
+# 2. 在 https://console.developers.google.com/apis/api/bigquery.googleapis.com/overview?project=<PROJECT_ID> 启用 BigQuery API
+# 3. systemd override 注入两个 env：
+sudo tee /etc/systemd/system/patentlypatent-backend.service.d/bq.conf <<EOF
+[Service]
+Environment="GOOGLE_APPLICATION_CREDENTIALS=/root/ai-workspace/patent_king/.secrets/gcp-bq.json"
+Environment="BQ_BILLING_PROJECT=<PROJECT_ID>"
+EOF
+sudo systemctl daemon-reload && sudo systemctl restart patentlypatent-backend
+```
+
+缺凭证时 `patents_bq.is_available()` 返 False，agent 看不到 BQ 工具，行为静默回退到 A 路。
 
 ---
 
@@ -78,7 +98,7 @@ agent SDK 默认通过 Claude Code CLI 子进程跑，认证文件：
 - 位置：`/root/.claude/.credentials.json`
 - 401 / 过期处理：
   ```bash
-  # 方案 A（v0.18 已采用）：复制 claude 用户的有效凭证
+  # 方案 A（生产默认）：复制 claude 用户的有效凭证
   sudo cp /home/claude/.claude/.credentials.json /root/.claude/.credentials.json.bak
   sudo cp /home/claude/.claude/.credentials.json /root/.claude/.credentials.json
   sudo systemctl restart patentlypatent-backend
@@ -116,15 +136,19 @@ sqlite3 /root/ai-workspace/patent_king/backend/patentlypatent.db .dump \
 | nginx error | `sudo tail -f /var/log/nginx/error.log` |
 | agent 监控 API | `curl -s 'https://blind.pub/patent/api/admin/agent_runs?limit=50' \| jq` |
 
-agent_runs 字段：`endpoint / project_id / idea / num_turns / total_cost_usd / duration_ms / stop_reason / fallback_used / error / is_mock`。
+agent_runs 字段：`endpoint / project_id / idea / num_turns / total_cost_usd / duration_ms / stop_reason / error`。
 
 ---
 
 ## 8. cost / 配额监控
 
-- **每日 cost 预算**：`GET /api/admin/budget_status`（v0.21 计划新增；当前代码未找到该端点，待补齐）
-- **智慧芽配额**：智慧芽控制台 <https://analytics.zhihuiya.com/> 查 OpenAPI 调用次数；本系统已加 LRU/TTL cache（300s/256 entries）+ 4 场景错误兜底，超限会 graceful 返空
+- **每日 cost 预算**：`GET /api/admin/budget_status` 已实现，warn $2 / block $10
+- **智慧芽 OpenAPI 余额**：控制台 <https://open.zhihuiya.com/> 后台→套餐管理。
+  - 业务错 `67200005 Insufficient balance` / `67200004` **上抛**让 LLM 看见，SYSTEM_PROMPT 引导切 B 路 BigQuery；日志：`grep "Insufficient balance" -i ...`
+  - 同接口连续 0 命中 + 67200005 大量出现 → 立即查套餐；search/insights/legal-status 套餐分开
+- **B 路 BigQuery 配额**：免费层 1TB 扫描/月，本 adapter 默认 LIMIT 50 + 字段裁剪，日常远不到上限；监控 <https://console.cloud.google.com/billing>
 - **Anthropic cost**：每次 agent 跑写 `agent_runs.total_cost_usd`，admin Dashboard echarts line 按 endpoint 分系列展示
+- **OAuth 凭证状态**：`agent_runs` 表观察 `stop_reason='stop_sequence'` + `num_turns=1` + `cost=0` + delta 为空 → CLI 401，立即去 §5 刷凭证
 
 ---
 
@@ -132,12 +156,14 @@ agent_runs 字段：`endpoint / project_id / idea / num_turns / total_cost_usd /
 
 | 症状 | 处理 |
 |---|---|
-| agent fallback 率 > 30% | `sudo systemctl edit patentlypatent-backend` 关 `PP_AGENT_PRIOR_ART=0` → `daemon-reload` + `restart`，回退老 mining |
-| cost 单日 > $10 | 临时降阈值：override 加 `Environment=PP_DAILY_BUDGET_BLOCK=5` → restart（需后端实现该 env 守卫，v0.21 待补） |
-| 智慧芽 401 | 检查 `.secrets/zhihuiya.env` token 是否过期，重启后端 |
-| claude CLI 401 | 见 §5 复制凭证或 `sudo claude /login` |
+| 智慧芽连续 0 命中 + 误判蓝海 | curl `connect.zhihuiya.com/search/patent/query-search-count` 检验，若 67200005 → 后台续费 search/insights 套餐 |
+| claude CLI 401（AI 不出回答只显示一句乱码） | `sudo cp /home/claude/.claude/.credentials.json /root/.claude/.credentials.json` 并 `systemctl restart`，过期参 §5 |
+| 进项目永远"思考中"，但 ▶ 开始挖掘按钮没用过 | 数据库有僵死 running run（startup 自动清理一次）。手动：`UPDATE agent_runs SET status='cancelled' WHERE status='running'` 再 restart |
+| 用户上传 PDF/pptx AI 看不到 | 检查 `backend/storage/uploads/<pid>/<fid>/` 文件是否在；`file_extract.py` 是否报错；老 `.doc/.ppt` 不支持需用户另存 |
+| cost 单日 > $10 | budget 自动 503 阻断；查 admin Dashboard 看哪个 endpoint 烧最猛；调 `PP_DAILY_BUDGET_BLOCK` env 临时降 |
 | 部署回滚 | `git revert <sha>` → 见 §10 全流程重 build/restart；DB 回滚用 §6 dump |
 | 后端崩溃 | journalctl 看 traceback；常见：DB 锁（WAL 模式应不会）、claude CLI 子进程超时 |
+| 项目"本系统文档"不显示 / 内容过期 | `system_docs.py:backfill_all_projects` 启动期幂等；改 `docs/*.md` 后 `systemctl restart` 自动推到所有项目；sessionStorage cache 升 v2 强制清旧 |
 
 ---
 
@@ -165,18 +191,49 @@ curl -sf https://blind.pub/patent/api/admin/agent_runs?limit=1 | jq .
 
 ---
 
-## 关键事实速查
+## 11. 日常巡检清单
 
-- 端口：FastAPI `127.0.0.1:8088`（仅本地，nginx 反代外暴）
-- 默认开关：`PP_AGENT_PRIOR_ART=1`（prior_art 走 agent SDK），其余 `PP_AGENT_EMBODIMENTS / PP_AGENT_CLAIMS / PP_AGENT_DRAWINGS / PP_AGENT_SUMMARY` 默认 OFF
-- LRU cache TTL：300s，max 256 entries
-- agent SDK 默认 max_turns：8
+```bash
+# 后端启动日志 3 条关键
+sudo journalctl -u patentlypatent-backend --since "5 min ago" --no-pager | grep -E "startup|system_docs|stale"
+# 期望：
+#   system_docs: backfilled N projects
+#   startup ok | claude_cli=... | 智慧芽凭证就位 | BigQuery 凭证状态
+#   (可选) marked X stale running AgentRun as cancelled
 
-> TODO：`/api/admin/budget_status` 与 `PP_DAILY_BUDGET_BLOCK` env 守卫在 v0.21 计划中（iteration_log v0.20 末尾下轮目标），代码 grep 无匹配，部署前需确认是否上线，否则 §8 §9 相关条目为占位。
+# 智慧芽余额自检
+curl -sS -X POST "https://connect.zhihuiya.com/search/patent/query-search-count" \
+  -H "Authorization: Bearer ${ZHIHUIYA_TOKEN}" \
+  -H "Content-Type: application/json" \
+  -d '{"query":"TAC: (test)"}' | jq
+# 期望 {"status":true,"error_code":0,"data":...}；67200005 即套餐到期
+
+# Anthropic 凭证自检
+sudo -u root /root/ai-workspace/patent_king/backend/.venv/lib/python3.12/site-packages/claude_agent_sdk/_bundled/claude --version
+
+# 24h cost 监控
+curl -s "https://blind.pub/patent/api/admin/budget_status" | jq
+```
 
 ---
 
-## CAS 对接 (v0.23)
+## 关键事实速查
+
+- 端口：FastAPI `127.0.0.1:8088`（仅本地，nginx 反代外暴）
+- 模型：`claude-opus-4-7` 主，`claude-sonnet-4-6` light
+- LLM 凭证：仅 claude CLI OAuth（`/root/.claude/.credentials.json`），**不依赖 ANTHROPIC_API_KEY**
+- 智慧芽：`.secrets/zhihuiya.env` 含 REST token + 托管 MCP URLs
+- BigQuery：`.secrets/gcp-bq.json` + env `GOOGLE_APPLICATION_CREDENTIALS` + `BQ_BILLING_PROJECT`
+- 静态部署：`/var/www/patent/`（nginx 直供，base=`/patent/`）
+- DB：SQLite WAL `backend/patentlypatent.db`，并发读 + 单写
+- 文件上传：`backend/storage/uploads/<pid>/<fid>/<name>`
+- 智慧芽 in-house REST cache：LRU TTL 300s / max 256 entries
+- SSE 并发：Semaphore 5；日预算 warn $2 / block $10
+- agent SDK 默认 max_turns：interview 8 / mine_full 5
+
+---
+
+## CAS 对接
 
 PatentlyPatent 支持 CAS protocol 2.0/3.0 单点登录，与 fake JWT 共存——前端 Login 页同时显示「员工/管理员一键登录」与「🏢 企业 CAS 登录」按钮（CAS 按钮仅在后端 `cas_enabled=true` 时出现）。
 

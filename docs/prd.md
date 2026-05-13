@@ -1,6 +1,6 @@
-# patent_king 产品需求文档
+# PatentlyPatent 产品需求文档
 
-> 更新于 2026-05-12 · 配套：[`hld.md`](./hld.md) · [`user_guide.md`](./user_guide.md) · [`deploy_runbook.md`](./deploy_runbook.md)
+> 更新于 2026-05-13 · 配套：[`hld.md`](./hld.md) · [`user_guide.md`](./user_guide.md) · [`deploy_runbook.md`](./deploy_runbook.md)
 
 ---
 
@@ -26,11 +26,11 @@
 
 ### 1.1 一句话宣言
 
-> **patent_king 是企业内部的 AI 专利挖掘工作台：让任何一名研发员工都能在 1 小时内，与资深代理人级 AI 对话，把一个含糊的发明点变成可交付代理所的中文交底书初稿。**
+> **PatentlyPatent 是企业内部的 AI 专利挖掘工作台：让任何一名研发员工都能在 1 小时内，与资深代理人级 AI 对话，把一个含糊的发明点变成可交付代理所的中文交底书初稿。**
 
 ### 1.2 定位象限
 
-| 维度 | patent_king | 传统流程 | 通用 ChatGPT |
+| 维度 | PatentlyPatent | 传统流程 | 通用 ChatGPT |
 | --- | --- | --- | --- |
 | **目标用户** | 企业研发员工（非专代） | 专利代理人 | 通用知识工作者 |
 | **流程闭环** | 报门 → 对话挖掘 → 写章节 → 导出 docx | 员工报 idea → 等代理人来访 → 数周回稿 | 单 turn 问答，无项目化 |
@@ -77,7 +77,7 @@
 | 切 agent_sdk 模式 / 日预算配置 | N | N | Y |
 | 查看他人 AgentRunLog | N | N | Y |
 
-> **当前实现状态（2026-05-12）**：employee / admin 已落地；kb_admin 为本 v2 新增角色，v0.37 实装（见路线图）。
+> **当前实现状态**：employee / admin 已落地；kb_admin 角色 P1 待实装。
 
 ### 2.3 典型画像（Persona）
 
@@ -105,7 +105,7 @@
 
 ```mermaid
 journey
-    title 张工首次使用 patent_king（90 分钟）
+    title 张工首次使用 PatentlyPatent（90 分钟）
     section 触达与登录
       收到企业邮件链接: 4: 张工
       点开 blind.pub/patent: 4: 张工
@@ -118,14 +118,18 @@ journey
       看到 上传进度条 N/3: 5: 张工
       点 创建项目: 5: 张工
     section 等附件归档
-      等待 收到附件 提示: 3: 张工
+      等待 附件上传完成 N/N 提示: 3: 张工
       看到 文件树自动出现 3 个 PDF: 5: 张工
+      自动落地 0-报门.md 在 我的资料/: 5: 张工
     section interview-first 挖掘
+      点顶部 开始挖掘 主按钮: 5: 张工
+      AI update_plan 6-8 步 TODO 顶部 sticky: 5: 张工
+      读 0-报门.md + 上传 PDF（read_user_file 真提文本）: 5: 张工
+      调智慧芽多关键词组合 + WebSearch + search_kb: 4: 张工
+      step 完成时 harness 自动推一行绿色汇报: 5: 张工
       AI 问 你这个算法解决什么具体场景: 4: 张工
       回答 在线广告竞价低延迟: 5: 张工
-      AI 问 现有方案问题点是什么: 4: 张工
-      回答 现有 LR 模型不收敛: 5: 张工
-      AI 又问 5 个问题: 3: 张工
+      AI 又问 2 个事实/数据问题: 3: 张工
       AI 发出 READY_FOR_WRITE 信号: 5: 张工
       自动触发 mineFull 5 章写作: 5: 张工
     section 收尾与导出
@@ -139,14 +143,14 @@ journey
 
 ### 3.2 旅程关键愉悦点 vs 痛点
 
-| 阶段 | 愉悦点（产品要强化） | 痛点（产品要消解） |
+| 阶段 | 愉悦点（产品要强化） | 待改进点 |
 | --- | --- | --- |
-| **登录** | CAS 一键 SSO，不用记新密码 | dev role 切换暴露在生产（已修复 v0.26） |
-| **报门** | 拖拽 N 个 PDF + 实时进度 N/total | 上传慢、不知道传完没（v0.35 加 「附件归档完成」提示） |
-| **interview-first** | AI 像真代理人在问细节，员工有被「认真对待」感 | 早期版本 AI 直接生成，被员工反馈「胡编」（v0.30 修复） |
-| **写章节** | 5 章并行 SSE 流式，看着字一行行涌出来 | 期间断线 → 之前白跑（v0.36 detached run 修复） |
-| **收尾** | 答疑能自动写回 md，不用复制粘贴 | claim 措辞有时拗口，员工不敢动（P1：撰写阶段多轮迭代） |
-| **导出** | docx 一键下载、46K、Word 直接打开 | 模板曾用「No.34 科技进步奖」不合专利实务（v0.34 换 5 章交底书模板） |
+| **登录** | CAS 一键 SSO，不用记新密码 | 真员工库 + CAS server 联调 |
+| **报门** | 拖拽 N 个 PDF + 实时进度 N/total + 附件归档完成提示 | — |
+| **interview-first** | AI 像真代理人在问细节，员工有被「认真对待」感 | — |
+| **写章节** | 5 章并行 SSE 流式 + 断线 detached run 后端跑到底 + 重连补 events | — |
+| **收尾** | 答疑能自动写回 md，不用复制粘贴 | claim 措辞局部重写（撰写阶段多轮迭代，P1） |
+| **导出** | docx 一键下载、46K、Word 直接打开 | kb_admin 自定义 docx 模板（P1） |
 
 ---
 
@@ -222,42 +226,48 @@ flowchart TB
 
 ## 5. 功能模块清单
 
-### 5.1 P0 — 已上线（v0.36 当前生产）
+### 5.1 P0 — 已上线
 
-| # | 模块 | 子能力 | 落地版本 | 状态 |
-| --- | --- | --- | --- | --- |
-| F-01 | **登录** | JWT 真账密 + CAS SSO + dev role（仅 DEV） | v0.21 / v0.23 / v0.28 | ✅ |
-| F-02 | **报门** | 多文件拖拽 + 进度条 N/total + 阶段卡片 + 3 根 folder 自动建 | v0.5 / v0.10 / v0.14 | ✅ |
-| F-03 | **附件归档等待** | 上传完成才启动 agent，避免读不到资料 | v0.35 | ✅ |
-| F-04 | **interview-first 挖掘** | 先问后写；AI 自评素材足够才发 `[READY_FOR_WRITE]` | v0.30 | ✅ |
-| F-05 | **mineFull 5 章自动写作** | 信号触发；prior_art / summary / embodiments / claims / drawings_description 5 节并行 SSE | v0.20 / v0.31 | ✅ |
-| F-06 | **答疑回填** | answer_router 5 类关键词分发，写回对应 md H2 锚点 | v0.13 | ✅ |
-| F-07 | **docx 导出** | python-docx 5 章交底书模板（v0.34 替换 No.34）；`{title}-交底书.docx` | v0.7 / v0.34 | ✅ |
-| F-08 | **文件树** | 我的资料 / AI 输出 / .ai-internal(hidden) / 📚 专利知识 | v0.10 / v0.22 | ✅ |
-| F-09 | **文件预览** | pdf / docx / pptx / md / json / 图片 inline | v0.11 / v0.27 | ✅ |
-| F-10 | **kb 只读浏览** | 419 文件 / 37 子目录 / 92.7MB；mutate 守卫 | v0.22 | ✅ |
-| F-11 | **资深代理人 persona** | CN+US 双轨执业 10 年；prompt 注入 419 篇 kb 索引 | v0.34 | ✅ |
-| F-12 | **SSE 流 + 断线恢复** | detached run；前端断线重连 ?from=N | v0.36 | ✅ |
-| F-13 | **SSE 限流** | Semaphore(5)；超限 503 | v0.21 | ✅ |
-| F-14 | **日预算阻断** | warn $2 / block $10；update_after_run 聚合 | v0.21 | ✅ |
-| F-15 | **admin Dashboard** | 8 卡片：项目状态饼 / 评分柱 / agent_runs / cost 时序 / fallback / error 24h / A-B / 预算 | v0.21–v0.36 | ✅ |
-| F-16 | **AgentRunLog** | 每次 agent 调用入库：endpoint / cost / duration / fallback / error | v0.19 | ✅ |
-| F-17 | **6 步使用教程组件** | 首次登录顶部引导 | v0.26 | ✅ |
+| # | 模块 | 子能力 | 状态 |
+| --- | --- | --- | --- |
+| F-01 | **登录** | JWT 真账密 + CAS SSO | ✅ |
+| F-02 | **报门** | 多文件拖拽 + 进度条 + 4 根 folder 自动建 + `0-报门.md` 自动落地 | ✅ |
+| F-03 | **附件等待 + 真文本提取** | PDF/pptx/docx/xlsx/xls/text 全格式（pdfplumber / python-pptx / python-docx / openpyxl / xlrd）；DB 缓存 | ✅ |
+| F-04 | **interview-first 挖掘** | 用户手动点 ▶ 开始挖掘；AI 自评素材足够发 `[READY_FOR_WRITE]` | ✅ |
+| F-05 | **harness 自动汇报** | plan diff in_progress→completed/failed 自动 push 绿/红气泡，不依赖 AI 自觉 | ✅ |
+| F-06 | **mineFull 5 章自动写作** | `[READY_FOR_WRITE]` 触发；5 节并行 SSE | ✅ |
+| F-07 | **重新挖掘救命按钮** | 🔄 cancel run + clear plan + reset chat + 重启 interview | ✅ |
+| F-08 | **docx 导出** | python-docx 5 章交底书模板；`{title}-交底书.docx` | ✅ |
+| F-09 | **4 根文件树** | 我的资料 / AI 输出 / 📖 **本系统文档**（只读）/ 📚 专利知识（只读）/ .ai-internal(hidden) | ✅ |
+| F-10 | **本系统文档自动同步** | 启动期幂等回填 PRD / HLD / 使用说明 / 部署运维手册 到所有项目；用户在文件树随时查 | ✅ |
+| F-11 | **文件预览 Drawer 4 态** | closed / drawer 50% / fullscreen / pinned 480px 固定栏 | ✅ |
+| F-12 | **kb 只读浏览** | 419 文件 / 37 子目录 / 92.7MB | ✅ |
+| F-13 | **资深代理人 persona** | CN+US 双轨执业 10 年；硬性调研门槛 + 5 决策点 + A22/A26/R20.2 法条体检 | ✅ |
+| F-14 | **专利检索 A+B 双路** | A 路智慧芽托管 MCP（logic 2 + main 17 = 19 工具）；B 路 Google Patents BigQuery 降级（免费，CN 全量）；A 路业务错时自动切 B | ✅ |
+| F-15 | **MCP 工具全集** | A+B 19+2 + in-process 智慧芽 in-house 5 + WebSearch/WebFetch + kb 2 + project files 4 + update_plan = 35 工具 | ✅ |
+| F-16 | **真 token 级流** | SDK include_partial_messages=True + tool_use_id 关联 + plan 卡 sticky | ✅ |
+| F-17 | **可折叠"调研过程"分组** | 连续 thinking + tool_call 合并默认折叠，AI 文本独立气泡 | ✅ |
+| F-18 | **markdown + mermaid 渲染** | marked GFM + DOMPurify + 动态 mermaid SVG（chat + 文件预览） | ✅ |
+| F-19 | **SSE 流 + 断线恢复** | detached run；启动期僵死 run 清理；卡死自愈 60s | ✅ |
+| F-20 | **SSE 限流** | Semaphore(5)；超限 503 | ✅ |
+| F-21 | **日预算阻断** | warn $2 / block $10 | ✅ |
+| F-22 | **Dashboard 项目管理** | 卡片 ⋯ 菜单（归档/删除）+ 批量选择删除 | ✅ |
+| F-23 | **admin Dashboard 监控** | agent_runs / cost / fallback / error / 预算 | ✅ |
+| F-24 | **AgentRunLog 全链路** | endpoint / cost / duration / stop_reason / error | ✅ |
 
-### 5.2 P1 — 下一季度（v0.37 → v0.39）计划
+### 5.2 P1 — 下一季度计划
 
-| # | 模块 | 子能力 | 目标版本 | 优先级 |
-| --- | --- | --- | --- | --- |
-| F-18 | **本系统文档只读根** | admin 在文件树根部看到 `docs/` 只读，方便随时查 PRD/HLD/runbook | v0.37 | 高（用户刚要求）|
-| F-19 | **kb_admin 角色 + kb 写权限** | RBAC 增加 kb_admin；kb 节点开放上传/编辑/删除 | v0.37 | 高 |
-| F-20 | **检索阶段（智慧芽精检）** | 在 interview-first 与 mineFull 之间增加「精检」步骤：基于已挖掘的关键词、IPC、申请人组合查重 | v0.38 | 高 |
-| F-21 | **撰写阶段多轮迭代修订** | 写完一章后允许员工说「这段太长 / 用另一种实施例」，AI 局部重写不重跑全章 | v0.38 | 高 |
-| F-22 | **专利性初判报告** | 检索阶段后自动生成「新颖性 / 创造性」初判 markdown，标 X/Y/N 文献 | v0.38 | 中 |
-| F-23 | **Sentry + cron 备份** | 错误监控 + sqlite 每日备份 | v0.37 | 中 |
-| F-24 | **真用户库 + CAS 联调** | 取代 u1/u2 fixture；员工首次 SSO 自动建 user 行 | v0.37 | 中 |
-| F-25 | **a11y + 移动端 375/768** | Lighthouse a11y > 90；响应式 token 已就位，待真机扫 | v0.39 | 低 |
+| # | 模块 | 子能力 | 优先级 |
+| --- | --- | --- | --- |
+| F-30 | **检索阶段精检** | interview 和 mineFull 之间加「精检」基于已挖掘关键词 + IPC + 申请人组合查重 | 高 |
+| F-31 | **撰写阶段多轮迭代修订** | 写完一章后允许说「这段太长 / 用另一种实施例」局部重写 | 高 |
+| F-32 | **kb_admin 角色 + kb 写权限** | RBAC 增加 kb_admin；kb 节点开放上传/编辑 | 中 |
+| F-33 | **专利性初判报告** | 检索后自动生成「新颖性 / 创造性」初判，标 X/Y/N 文献 | 中 |
+| F-34 | **Sentry + cron 备份** | 错误监控 + sqlite 每日备份 | 中 |
+| F-35 | **真用户库 + CAS 联调** | 取代 u1/u2 fixture；员工首次 SSO 自动建 user 行 | 中 |
+| F-36 | **a11y + 移动端 375/768** | Lighthouse a11y > 90 | 低 |
 
-### 5.3 P2 — 远景（v0.40+）视野
+### 5.3 P2 — 远景视野
 
 | # | 模块 | 子能力 | 说明 |
 | --- | --- | --- | --- |
@@ -273,20 +283,13 @@ flowchart TB
 
 ### 6.1 设计原理
 
-传统 agent 流程靠「字数 / 章节数 / 轮次」等 heuristic 触发跃迁，容易出现：
-
-- 员工还没说清楚就开写 → 章节空洞；
-- 员工已经说完了但 AI 还在追问 → 体验拖沓；
-- 5 章写完了但其实没收尾 → 直接出 docx 漏 claim 校验。
-
-**v0.31 起改为「信号驱动」**：AI 在 prompt 里被显式约束「当且仅当 X 时输出信号 Y」，后端 SSE 流监听到信号原文则触发对应跃迁。
+不靠「字数 / 章节数 / 轮次」等 heuristic（容易出现章节空洞 / 体验拖沓 / 漏 claim 校验），而是**信号驱动**：AI 在 prompt 里被显式约束「当且仅当 X 时输出信号 Y」，后端 SSE 流监听到信号原文则触发对应跃迁。
 
 | 信号 | 含义 | 触发后端动作 |
 | --- | --- | --- |
-| `[READY_FOR_WRITE]` | AI 自评：interview 已收集足够素材，可以开始写 5 章 | 自动 POST `/api/agent/mine_full/{pid}` SSE |
-| `[READY_FOR_DOCX]` | AI 自评：5 章已写完 + 收尾确认完成，可以导出 | 前端 docx 导出按钮变可点击 + 推一条系统消息 |
-| `[NEED_USER_INPUT]` | AI 等用户答复，暂不前推 | 前端 chat 输入框 focus |
-| `[FALLBACK]` | agent 链路失败兜底到 mining.py legacy | 后端记录 AgentRunLog.fallback=True |
+| `[READY_FOR_WRITE]` | AI 自评：interview 已收集足够素材，可以开始写 5 章 | 前端检测信号 → 自动调 `/api/agent/runs/start` 启 mineFull |
+| `[READY_FOR_DOCX]` | AI 自评：5 章已写完 + 收尾确认完成，可以导出 | 前端 🎯 docx 按钮呼吸高亮 + 颜色 primary |
+| **`step_done` / `step_failed`**（harness 层） | plan diff：某 step 从 in_progress 变 completed/failed | 前端自动 push 一行绿/红轻量气泡（不依赖 AI 自觉叙述） |
 
 ### 6.2 状态机图
 
@@ -298,9 +301,11 @@ stateDiagram-v2
     attachments_uploading --> attachments_ready: 所有附件落盘
     drafting --> attachments_ready: 无附件直接跳过
 
-    attachments_ready --> interview: 用户首次进入工作台
-    interview --> interview: AI 提问 + 用户回答<br/>(NEED_USER_INPUT 循环)
-    interview --> writing: AI 发出 [READY_FOR_WRITE]
+    attachments_ready --> ready_to_start: 等用户主动启动
+    ready_to_start --> interview: 用户点 ▶ 开始挖掘
+    interview --> interview: AI 提问 + 用户回答 + 工具调用<br/>step_done/step_failed harness 自动汇报
+    interview --> writing: AI 输出 [READY_FOR_WRITE]
+    interview --> ready_to_start: 用户点 🔄 重新挖掘<br/>(cancel run + clear plan)
 
     writing --> writing_prior_art: 节 1
     writing_prior_art --> writing_summary: 节 1 done
@@ -316,13 +321,9 @@ stateDiagram-v2
     ready_docx --> docx_exported: 用户点导出
     docx_exported --> [*]
 
-    writing --> fallback: 任一章 [FALLBACK]
-    fallback --> writing_done: legacy 占位骨架填齐
-    fallback --> finalize
-
-    interview --> archived: 用户主动归档
-    writing --> archived: SSE 断线 detached run
-    archived --> interview: 用户回来重连 ?from=N
+    interview --> archived: 用户主动归档 / 关浏览器
+    writing --> archived: SSE 断线 detached run 后台继续
+    archived --> interview: 用户回来 active run 在跑 → resume<br/>未在跑 → 显示历史 + 🔄 重新挖掘
 ```
 
 ### 6.3 信号实战示例
@@ -431,11 +432,11 @@ graph LR
 
 | 指标 | 阈值（p95） | 当前实测 | 测量位置 |
 | --- | --- | --- | --- |
-| 首屏 LCP | < 2.0s | 1.6s（v0.16 拆包后） | 公网 Lighthouse |
+| 首屏 LCP | < 2.0s | 1.6s | 公网 Lighthouse |
 | 首屏体积（gzip） | < 300KB | 250KB | vite build report |
 | 报门接口耗时 | < 800ms | 320ms | 后端 access log |
 | interview 首字延迟 | < 3s | 2.1s（cache 命中后） | SSE first byte |
-| **5 节 mineFull 端到端** | **< 120s p95** | 92s（v0.34 实测） | agent_runs.duration_ms |
+| **5 节 mineFull 端到端** | **< 120s p95** | 92s | agent_runs.duration_ms |
 | docx 导出耗时 | < 5s | 1.8s | python-docx 耗时 |
 | kb 文件预览首字 | < 1s | 0.4s | preview SSE |
 
@@ -443,23 +444,24 @@ graph LR
 
 | 维度 | 要求 | 实现 |
 | --- | --- | --- |
-| **SSE 断线可恢复** | 任意时刻断线，重连可补齐未消费 events | v0.36 detached run + event_id 增量 |
+| **SSE 断线可恢复** | 任意时刻断线，重连可补齐未消费 events | detached run + event_id 增量 |
 | **fallback 兜底** | 任一节 agent 失败 → 自动 fallback 到 legacy 占位骨架，员工流程不中断 | mining.py legacy + AgentRunLog.fallback 标记 |
 | **服务自愈** | 进程 crash 后 systemd auto-restart < 5s | deploy_runbook.md `systemd` section |
-| **数据持久化** | sqlite WAL 模式 + 每日 cron 备份 | v0.13（WAL）+ v0.37 计划（cron） |
-| **附件归档保证** | agent 启动前确认所有 attachment 落盘 | v0.35 前置 wait |
+| **数据持久化** | sqlite WAL 模式 + 每日 cron 备份 | WAL 已就位；cron 备份脚本 P1 |
+| **附件归档保证** | agent 启动前确认所有 attachment 落盘 | 启动前 wait |
+| **专利检索降级** | 智慧芽业务错（67200004/05）时自动切 BigQuery | A→B 路链路就绪 |
 
 ### 8.3 安全
 
 | 维度 | 要求 | 实现 |
 | --- | --- | --- |
-| **认证** | JWT HS256 / 企业 CAS / 真账密 bcrypt 三选一 | v0.21 / v0.23 / v0.28 |
+| **认证** | JWT HS256 / 企业 CAS / 真账密 bcrypt 三选一 | FastAPI 路由 + middleware |
 | **授权** | RBAC：employee 只看自己项目；admin 只读全部 | FastAPI Depends 校验 |
 | **文件路径 sanitize** | resolve 后 `startswith(ROOT)` 防 `../` | kb / 项目 file API 通用 |
 | **上传大小限制** | 单文件 ≤ 50MB；kb 单文件 ≤ 5MB | nginx client_max_body + 后端校验 |
 | **LLM 凭证** | 走 claude CLI OAuth；**禁止** ANTHROPIC_API_KEY | systemd PATH+HOME override |
-| **智慧芽 token** | 存 `.secrets/zhihuiya.env`，git ignore；后端读 env | deploy_runbook.md |
-| **CAS XML 安全** | defusedxml 解析，防 XXE | v0.23 |
+| **智慧芽 token / GCP 凭证** | 存 `.secrets/zhihuiya.env`、`.secrets/gcp-bq.json`，git ignore | deploy_runbook.md |
+| **CAS XML 安全** | defusedxml 解析，防 XXE | routes/auth_cas.py |
 | **CORS** | 仅允许 blind.pub 域 | nginx + FastAPI middleware |
 
 ### 8.4 可观测
@@ -470,7 +472,7 @@ graph LR
 | **admin Dashboard 8 卡片** | 项目状态饼 / 评分柱 / agent_runs 表 / cost 时序 / fallback 率柱 / error 24h / A-B 对比 / budget_status |
 | **结构化日志** | uvicorn access log + 业务 logger（INFO/WARN/ERROR） |
 | **budget_status 端点** | sse_in_flight / daily_sum / daily_block 实时 |
-| **Sentry**（P1） | v0.37 接入，错误自动告警 |
+| **Sentry**（P1） | 错误自动告警 |
 
 ### 8.5 成本
 
@@ -489,7 +491,7 @@ graph LR
 
 | KPI | 定义 | 目标 | 当前 |
 | --- | --- | --- | --- |
-| **员工 NPS** | 「你会推荐给同事用 patent_king 吗？」9-10 分占比 - 0-6 分占比 | ≥ 40 | 待真用户采样（v0.37 起） |
+| **员工 NPS** | 「你会推荐给同事用 PatentlyPatent 吗？」9-10 分占比 - 0-6 分占比 | ≥ 40 | 真用户采样中 |
 
 ### 9.2 一级指标
 
@@ -498,7 +500,7 @@ graph LR
 | **完整挖掘率** | 报门项目中走到 `[READY_FOR_DOCX]` 的比例 | ≥ 70% | dry-run 框架已就位 |
 | **平均挖掘 cost** | agent_runs 按项目聚合的 cost_usd 中位数 | < $0.3 | $0.21（cache miss） |
 | **docx 一次通过率** | docx 导出后员工不再回到 finalize 修改的比例 | ≥ 60% | 待采样 |
-| **fallback 率** | AgentRunLog.fallback=True / 总次数 | < 30% | 0%（v0.19 起稳定） |
+| **fallback 率** | AgentRunLog.fallback=True / 总次数 | < 30% | 0%（稳定） |
 
 ### 9.3 二级指标
 
@@ -509,7 +511,7 @@ graph LR
 | 日预算阻断触发次数 | budget block / day | 0（理想） | 0 |
 | 后端单测 | pytest pass | 100% | 100% |
 | 前端单测 | vitest pass | 100% | 100%（44/44） |
-| Lighthouse a11y | score | > 90 | 待 v0.39 |
+| Lighthouse a11y | score | > 90 | 待优化 |
 
 ---
 
@@ -535,59 +537,38 @@ graph LR
 | 风险 | 概率 | 影响 | 缓解措施 |
 | --- | --- | --- | --- |
 | **LLM 幻觉写出错误专利分类号** | 中 | 高（误导员工） | persona 强约束 + kb 419 篇范本 + admin Dashboard fallback 监控 + docx 显式 disclaimer |
-| **claude CLI OAuth 凭证过期** | 中 | 高（全站 LLM 失效） | deploy_runbook.md 续期 SOP + Sentry 告警（v0.37） |
-| **智慧芽 API 限流 / 改字段** | 中 | 中 | 6 端点 TTL cache（10s）+ 降级到 keyword-only fallback + 适配层封装 |
+| **claude CLI OAuth 凭证过期** | 中 | 高（全站 LLM 失效） | deploy_runbook.md 续期 SOP + Sentry 告警（计划） |
+| **智慧芽 API 限流 / 改字段** | 中 | 中 | A 路智慧芽托管 MCP 业务错时自动切 B 路 Google Patents BigQuery；in-house wrap 端点 TTL cache（10s） |
 | **SSE 长连接被 nginx/网关切断** | 中 | 中 | nginx proxy_buffering off + detached run + 重连 ?from=N |
 | **员工上传敏感商业秘密外泄** | 低 | 高 | 全程不出企业内网 + LLM 走 claude CLI（无第三方 SDK 中转）+ 文件 sanitize |
 | **日 cost 超 $10 击穿** | 低 | 中 | budget block 硬阻断 + warn $2 早期预警 + admin 可调 env |
-| **kb 知识库 419 篇内容过时** | 高 | 低 | kb_admin 角色（v0.37）支持增量更新；prompt 不全文注入只注索引 |
-| **真用户 SSO 集成失败** | 中 | 高 | CAS XML 解析路径已 v0.23 跑通；保留 JWT 真账密兜底 |
-| **5 章模板与实际代理所偏好不符** | 中 | 中 | v0.34 已替换为通用 5 章；P1 让 kb_admin 自定义 docx 模板 |
+| **kb 知识库 419 篇内容过时** | 高 | 低 | kb_admin 角色支持增量更新（P1）；prompt 不全文注入只注索引 |
+| **真用户 SSO 集成失败** | 中 | 高 | CAS XML 解析路径已跑通；保留 JWT 真账密兜底 |
+| **5 章模板与实际代理所偏好不符** | 中 | 中 | 通用 5 章已就位；kb_admin 自定义 docx 模板（P1） |
 
 ---
 
-## 12. 路线图（v0.37 → v0.40）
+## 12. 路线图
 
-### 12.1 季度规划甘特图
+### 12.1 P1 在做
 
-```mermaid
-gantt
-    title patent_king 2026 Q2/Q3 路线图
-    dateFormat YYYY-MM-DD
-    section 已交付
-    v0.5-v0.28 MVP+CAS+设计系统  :done, m1, 2026-05-07, 2d
-    v0.29-v0.33 信号驱动状态机    :done, m2, 2026-05-09, 3d
-    v0.34-v0.36 资深 persona+detached run  :done, m3, 2026-05-10, 3d
+| 主题 | 范围 | 验收标准 |
+| --- | --- | --- |
+| **上线护栏** | Sentry 错误监控 / cron sqlite 备份 / 真员工 CAS 联调（替代 u1/u2 fixture） | (1) Sentry 收到 ≥ 1 条 (2) cron 每日跑 (3) ≥ 5 真员工 SSO 登陆成功 |
+| **kb_admin 角色** | 独立角色（与 admin 解耦）；可上传 / 编辑 / 删 kb 文件 | RBAC 通过；kb 节点写权限挂在 kb_admin |
+| **检索 + 撰写迭代** | interview→mineFull 之间加「精检」基于关键词+IPC+申请人组合查重；写完一章后允许单章局部重写 | (1) interview 后自动出精检报告含 ≥ 5 篇 X/Y/N (2) 单章「重写更短/换实施例」可触发 |
+| **专利性初判报告** | 检索后自动生成「新颖性 / 创造性」初判 | 引用 ≥ 5 篇文献，X/Y/N 标注 |
 
-    section v0.37 上线护栏
-    本系统文档只读根              :crit, v37a, 2026-05-13, 2d
-    kb_admin 角色 + RBAC          :v37b, after v37a, 3d
-    Sentry + cron 备份            :v37c, after v37a, 2d
-    真用户库 + CAS server 联调    :v37d, after v37b, 4d
+### 12.2 P2 远景
 
-    section v0.38 检索+撰写迭代
-    检索阶段（智慧芽精检）        :v38a, after v37d, 4d
-    专利性初判报告                :v38b, after v38a, 3d
-    撰写阶段多轮迭代修订          :v38c, after v38a, 5d
-
-    section v0.39 体验
-    a11y + 移动端 375/768         :v39a, after v38c, 5d
-    micro-interaction + 拖拽过渡  :v39b, after v39a, 3d
-
-    section v0.40 远景
-    多语言 EN disclosure          :v40a, after v39b, 7d
-    多 agent 协作                 :v40b, after v40a, 10d
-    团队共享 + 部门 RBAC          :v40c, after v40b, 7d
-```
-
-### 12.2 版本验收门槛
-
-| 版本 | 范围 | 验收标准 | 预计完成 |
-| --- | --- | --- | --- |
-| **v0.37 上线护栏** | 本系统文档只读根 / kb_admin / Sentry / cron 备份 / 真用户库 | (1) admin 文件树看到 `docs/` 只读 (2) kb_admin 能上传 (3) Sentry 收到 ≥ 1 条错误 (4) cron 备份每日跑 (5) 5 个真员工 CAS 登陆成功 | 2026-05-25 |
-| **v0.38 检索+撰写迭代** | 智慧芽精检阶段 / 专利性初判 / 章节局部重写 | (1) interview 后自动出精检报告 (2) 报告含 ≥ 5 篇 X/Y/N 标注 (3) 员工可对单章说「重写更短版」 | 2026-06-15 |
-| **v0.39 体验** | a11y / 移动端 / micro-interaction | Lighthouse a11y > 90；375px 单栏 OK；新教程动画 | 2026-07-10 |
-| **v0.40 多语言+多 agent** | EN disclosure 模板 / 三 agent 合议 / 部门共享 | (1) 可生成 EN docx (2) 员工看到「检索 agent + 撰写 agent + 审查 agent」分工 (3) leader 可看本组项目列表 | 2026-08-30 |
+| 主题 | 范围 |
+| --- | --- |
+| **体验** | a11y Lighthouse > 90；移动端 375/768 真测；micro-interaction |
+| **多语言** | EN disclosure 模板；US persona 已就位 |
+| **多 agent 协作** | 检索 agent + 撰写 agent + 审查 agent 三角合议 |
+| **团队共享** | 同部门员工只读他人项目；leader 看本组挖掘进展 |
+| **OA 答复辅助** | 上传审查意见 → AI 出答辩思路 + 修改建议 |
+| **专代审核闭环** | kb_admin 在 docx 批注 → 回到 web UI → 员工逐条改 |
 
 ---
 
@@ -595,33 +576,35 @@ gantt
 
 ### 13.1 已决策（精选）
 
-| ID | 决策 | 时点 | 理由 |
-| --- | --- | --- | --- |
-| D-1 | 走 Claude Agent SDK 而非直调 Anthropic API | v0.16 | tool 自驱 + 多 turn 内置；少量 @tool 装饰即可 |
-| D-2 | claude CLI OAuth 替代 ANTHROPIC_API_KEY | v0.18 | 企业可控；systemd PATH+HOME override |
-| D-3 | 信号驱动状态机替代 heuristic | v0.31 | 避免章数 / 字数 / 轮次的脆弱判断 |
-| D-4 | interview-first 替代 generate-first | v0.30 | 用户反馈「AI 一上来就胡编」 |
-| D-5 | 5 章交底书模板替代 No.34 科技进步奖模板 | v0.34 | No.34 是项目申报模板，不符专利实务；改资深代理人通用 5 章 |
-| D-6 | detached SSE run + ?from=N 恢复 | v0.36 | 长流程断网必然发生，必须可恢复 |
-| D-7 | 附件归档等待前置 | v0.35 | 早期版本 agent 启动时附件还没传完，读不到 → 报错 |
-| D-8 | kb 419 篇只读 + 不入向量库 | v0.22 | 用户反馈不做 embedding；prompt 注入索引而非全文 |
-| **D-9** | **kb_admin 独立角色** | **v2.0**（本版） | IP 律师 / 资深专代要能维护内部范本，但不应有 admin 监控权限 |
-| **D-10** | **本系统文档只读根** | **v2.0**（本版） | admin 调试 / 复盘 / 答疑场景频繁要查 PRD/HLD/runbook，文件树直接看比开终端方便 |
+| ID | 决策 | 理由 |
+| --- | --- | --- |
+| D-1 | 走 Claude Agent SDK 而非直调 Anthropic API | tool 自驱 + 多 turn 内置；少量 @tool 装饰即可 |
+| D-2 | claude CLI OAuth 替代 ANTHROPIC_API_KEY | 企业可控；systemd PATH+HOME override |
+| D-3 | 信号驱动状态机替代 heuristic | 避免章数 / 字数 / 轮次的脆弱判断 |
+| D-4 | interview-first 替代 generate-first | 先问清楚再写，避免胡编 |
+| D-5 | 通用 5 章交底书模板 | 资深代理人实务通行结构 |
+| D-6 | detached SSE run + ?from=N 恢复 | 长流程断网必然发生，必须可恢复 |
+| D-7 | 附件归档等待前置 | agent 启动前确保所有 attachment 落盘可读 |
+| D-8 | kb 419 篇只读 + 不入向量库 | 不做 embedding；prompt 注入索引而非全文 |
+| D-9 | kb_admin 独立角色（与 admin 解耦） | IP 律师 / 资深专代要能维护内部范本，但不应有 admin 监控权限 |
+| D-10 | 本系统文档只读根挂在文件树 | admin 调试 / 复盘 / 答疑场景频繁要查 PRD/HLD/runbook，文件树直接看比开终端方便 |
+| D-11 | 专利检索 A+B 双路（智慧芽托管 MCP + Google Patents BigQuery） | A 路收费但更新及时 + 有相似度排序；B 路免费降级备选；A 路业务错时自动切 B |
+| D-12 | 所有 LLM 走 claude CLI 子进程 | 统一 OAuth、企业可控、不依赖 ANTHROPIC_API_KEY |
 
 ### 13.2 开放问题（TODO）
 
-| ID | 问题 | 当前状态 | 计划版本 |
-| --- | --- | --- | --- |
-| O-1 | Sentry 接入 + DSN 配置 | 未做 | v0.37 |
-| O-2 | sqlite cron 备份脚本 | runbook 有 cmd 未落 | v0.37 |
-| O-3 | CAS server 真员工联调 | u1/u2 fixture | v0.37 |
-| O-4 | 多租户隔离 cache 穿透 | 未做 | v0.40+ |
-| O-5 | 4 节 smart 默认 ON 阈值 | prior_art ON，其余 OFF | v0.38（数据足够后） |
-| O-6 | docx 模板让 kb_admin 自定义 | 硬编码 5 章 | v0.38 |
-| O-7 | 移动端 a11y 真机扫 | tokens 已就位 | v0.39 |
-| O-8 | benchmark 真跑 prod 性能基线 | dry-run 框架 | v0.37 起采样 |
-| O-9 | 多 agent 合议的 UI 设计 | 未设计 | v0.40 |
-| O-10 | EN disclosure 模板细节 | persona 已支持 US 实务 | v0.40 |
+| ID | 问题 | 当前状态 |
+| --- | --- | --- |
+| O-1 | Sentry 接入 + DSN 配置 | 未做 |
+| O-2 | sqlite cron 备份脚本落地 | runbook 有 cmd 待挂 |
+| O-3 | CAS server 真员工联调 | u1/u2 fixture，待企业 CAS URL |
+| O-4 | 多租户隔离 cache 穿透 | 未做（远景） |
+| O-5 | 4 节 smart 默认 ON 阈值 | prior_art ON，其余 OFF（数据足够后再开） |
+| O-6 | docx 模板让 kb_admin 自定义 | 硬编码 5 章 |
+| O-7 | 移动端 a11y 真机扫 | tokens 已就位，未真测 |
+| O-8 | benchmark 真跑 prod 性能基线 | dry-run 框架，未采样 |
+| O-9 | 多 agent 合议的 UI 设计 | 未设计 |
+| O-10 | EN disclosure 模板细节 | persona 已支持 US 实务，模板待写 |
 
 ---
 
@@ -638,6 +621,7 @@ gantt
 | **detached run** | SSE 后端任务脱离前端连接独立跑，前端可断线重连 |
 | **资深代理人 persona** | prompt 注入「CN+US 双轨执业 10 年代理人」人设 |
 | **信号** | AI 在文本里输出 `[READY_FOR_WRITE]` 等标记，触发后端状态跃迁 |
+| **A 路 / B 路检索** | A=智慧芽托管 MCP（首选，收费）；B=Google Patents BigQuery（降级，免费） |
 
 ---
 

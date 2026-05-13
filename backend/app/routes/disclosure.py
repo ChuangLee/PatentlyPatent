@@ -20,6 +20,7 @@ from sqlalchemy.orm import Session
 from ..config import settings
 from ..db import get_db
 from ..disclosure_docx import generate_disclosure_docx
+from ..disclosure_no34 import generate_no34_docx
 from ..models import FileNode, Project
 from ..schemas import FileNodeOut
 
@@ -100,8 +101,13 @@ def generate_docx(pid: str, db: Session = Depends(get_db)):
         )
     setattr(project, "_user_attachments", user_attachments)
 
-    # 4) 生成 docx bytes
-    blob = generate_disclosure_docx(project, md_files)
+    # 4) 生成 docx bytes —— v0.37 默认走 No34 模板填充；失败 fallback 旧版从零拼装
+    try:
+        blob = generate_no34_docx(pid, db)
+    except Exception as e:  # noqa: BLE001
+        import logging
+        logging.getLogger(__name__).warning("No34 模板填充失败，回退旧版: %s", e)
+        blob = generate_disclosure_docx(project, md_files)
 
     # 5) 落盘
     ts = datetime.now().strftime("%Y%m%d%H%M%S")

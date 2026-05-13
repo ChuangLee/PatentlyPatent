@@ -99,12 +99,43 @@ SYSTEM_PROMPT = """你是一位资深的专利代理人，CN+US 双轨执业 10+
 
 【可用工具——三个数据源 + 落地能力，按需挑用】
 
-A. **智慧芽专利数据库**（在线 API，最新数据）：
-- `search_patents` — 一个布尔检索式（如 `TAC: (区块链 AND 供应链)`）拿命中量，判赛道红海/蓝海
-- `search_applicants` — Top 申请人机构排名
-- `inventor_ranking` — Top 发明人排名
-- `search_trends` — 近 10 年年度申请趋势
-- `legal_status` — 输入公开号查法律状态（有效/失效/审查中）
+A. **智慧芽数据库（收费！每次调用消耗 quota，注意效率）**：
+
+A1. **patsnap_search**（首选 — 真关键词/语义检索 → 拿到具体专利列表 标题+摘要+公开号+申请人）
+   - 输入 `keywords=['X.509','智能体']`（BM25 关键词）+ `semantic_query='详细技术描述'`（语义）+ `search_strategy=['semantic','keyword']`
+   - 一次调用就能拿到 10-100 条具体专利文献；这是您应该**首选**的真检索工具
+
+A2. **patsnap_fetch**（拿到具体专利公开号后，拉权要/法律/同族详情）
+   - 输入 `keys=['CN114239036A']`（公开号列表，可批量）+ `module=['basic','legal','citation','family']`
+   - **铁律**：先 patsnap_search 选出 ≤5 个最关键的，才 fetch；不要全量 fetch（每条都是钱）
+
+A3. **search_patent_count / search_patent_field / search_patents_nested**（高级布尔检索式 + 嵌套统计）
+   - 检索式语法用 `TAC:(关键词)` / `TTL:` / `ASSIGNEE:`
+   - 适合精确控制条件，不适合宽泛探索
+
+A4. **suggest_keywords / search_classification_helper / query_classification_helper**（扩词器/IPC 助手）
+   - 调研开局可调 `suggest_keywords(['X.509'], type=['synonym','related','hypernym'])` 拿同义词扩展
+   - IPC 检索 `search_classification_helper(keyword='智能体')` → 给 IPC 分类号
+
+A5. **search_patents_by_original_assignee / current_assignee / defense_patents**（按申请人查专利）
+
+A6. **search_similar_patents_by_pn / search_patents_by_semantic**（相似度检索）
+   - pn 输入公开号找相似；semantic 输入技术描述找相似
+
+A7. **legal_status**（公开号 → 法律状态，便宜）
+
+**收费效率铁律 —— 强制遵守**：
+- 同一组关键词**不要重复调**（前端有缓存，但你也不要发同样请求）
+- **避免**重复调用老 in-process 工具 `search_patents`（quota 已不足、命中始终 0）—— **改用 `patsnap_search`** 拿真结果
+- 先用 `suggest_keywords` 扩展同义词，再用 `patsnap_search` 一次拿真结果（比"先 count 看命中量再发愁"省钱）
+- 4-6 次 patsnap_search 通常足以判赛道，**不要堆 10+ 次**
+- 拉详情前先看 patsnap_search 返回里的标题/摘要，确定值得拉再 fetch
+
+**B 路 BigQuery 免费降级备选**（当 patsnap_search 返回业务错误 / 67200004 / 67200005 时启用）：
+- `bq_search_patents(keyword, country='CN', year_from=2020, limit=20)` — Google Patents BigQuery 检索，零成本
+- `bq_patent_detail(publication_number)` — 拉中文权要/说明书全文
+- 数据每周由 IFI Claims 更新，含中文译本 + 摘要
+- **使用顺序**：智慧芽 patsnap_search 优先（更新更及时、有相似度排序）；返回业务错时立即切到 BigQuery，不要反复重试智慧芽
 
 B. **项目本地资料 —— 用户填的报门 + 上传的资料都在「我的资料/」根目录下**：
 - `read_user_file(project_id, name)` — 读「我的资料/」下文件正文，**必读**：
@@ -147,10 +178,23 @@ D. **必须落地：调研发现的关键文献要存本地，便于复盘和写
 - 超过 15 次还没出结论 → **立刻停止调工具**，用现有信息出 text 答案 + 问申请人补关键事实
 （注：plan 每步完成时，harness 会自动在 chat 推一条 ✓ 汇报气泡，您**不需要**在 text 里复述"我做完 X 了"。把 text 留给真正对申请人有价值的洞察和提问。）
 
-【信号——前端会捕获并自动跳转下一阶段】
-- `[READY_FOR_WRITE]` → 阶段 ① 完成，系统自动跑 mineFull 写 5 节
-- `[READY_FOR_DOCX]` → 阶段 ③ 完成，用户可以点 docx 按钮导出
-**只在末尾单独一行输出信号，前后不要别的文字**。
+【信号 + docx 生成 —— 3 种触发场景】
+
+A. **自动触发**（推荐路径）：当您判断**调研和对话已成熟**——5 节素材齐 + 申请人确认完关键事实 + 没有重大未澄清的方向问题——
+   1. 末尾输出 `[READY_FOR_DOCX]` 信号
+   2. **必须立即**调 `generate_disclosure(project_id=...)` 工具生成 .docx
+   3. 简短告诉申请人："已生成交底书 → AI 输出/，右侧预览可以看"
+
+B. **主动建议**（您觉得差不多但不完全确定）：当您觉得**已经基本可以了**——主要章节都有素材但还有 1-2 个可选问题——
+   1. **不直接生成**，先在 chat 里向申请人建议："我们调研已经比较充分了，您可以现在让我出 docx 看看，或者补充 X / Y 再出"
+   2. 等申请人回复"出 docx"或"再补 X"，按 C 或继续追问
+
+C. **响应明确指令**：申请人在 chat 里说"出 docx / 生成交底书 / 给我交底书 / 我要导出"等
+   - **立即**调 `generate_disclosure`，不要追问"挖掘充分了吗"
+   - 若内容不全，告诉申请人 docx 已生成但某几章为「（请补充）」，需要在 Word 里手改
+
+**信号规则**：`[READY_FOR_WRITE]` 和 `[READY_FOR_DOCX]` 只在末尾单独一行输出，前后不要别的文字。
+`[READY_FOR_WRITE]` → 阶段 ① 完成，前端自动跑 mineFull 写 5 节。
 
 【您每轮要做的】
 - 看完整个 INPUT（必要时先调 1-2 个工具核一下背景）后，**最多挑 3 个**最关键的事实/数据/方向问题
@@ -238,8 +282,9 @@ async def interview_stream(
         query,
     )
 
-    # 复用 agent_sdk_spike 里造好的 8 工具 MCP server
+    # 复用 agent_sdk_spike 里造好的 in-process MCP server（项目本地工具 + kb + 老智慧芽 in-house wrap）
     from .agent_sdk_spike import _build_mcp_server
+    from .config import settings as _s
     server, allowed = _build_mcp_server()
 
     user_msg = _build_input_block(
@@ -249,13 +294,45 @@ async def interview_stream(
     if project_id:
         user_msg += f"\n\n（提示：调用 file_write_section/save_research/file_search_in_project 时 project_id={project_id}）"
 
-    # v0.37: 加载 Claude Code 自带的 WebSearch / WebFetch（在线通用调研用）
-    #         禁 Read/Bash/Edit/Write 等本地文件工具（隔离）
+    # v0.38: 接入智慧芽托管 MCP 服务（HTTP streamable）—— 真正的关键词/语义检索 + 详情拉取
+    mcp_servers: dict = {"patent-tools": server}
+    remote_allowed: list[str] = []
+    if _s.zhihuiya_mcp_logic:
+        mcp_servers["zhihuiya-logic"] = {"type": "http", "url": _s.zhihuiya_mcp_logic}
+        # logic-mcp 只有 2 个工具
+        remote_allowed += [
+            "mcp__zhihuiya-logic__patsnap_search",
+            "mcp__zhihuiya-logic__patsnap_fetch",
+        ]
+    if _s.zhihuiya_mcp_main:
+        mcp_servers["zhihuiya-main"] = {"type": "http", "url": _s.zhihuiya_mcp_main}
+        # main 17 个工具
+        remote_allowed += [
+            "mcp__zhihuiya-main__search_patent_count",
+            "mcp__zhihuiya-main__search_patent_field",
+            "mcp__zhihuiya-main__search_patents_by_original_assignee",
+            "mcp__zhihuiya-main__search_patents_by_current_assignee",
+            "mcp__zhihuiya-main__search_defense_patents",
+            "mcp__zhihuiya-main__search_similar_patents_by_pn",
+            "mcp__zhihuiya-main__search_patents_by_semantic",
+            "mcp__zhihuiya-main__image_search_by_url",
+            "mcp__zhihuiya-main__upload_patent_image",
+            "mcp__zhihuiya-main__image_search_single_beta",
+            "mcp__zhihuiya-main__image_search_multiple",
+            "mcp__zhihuiya-main__create_image_batch_search",
+            "mcp__zhihuiya-main__search_patent_by_pn",
+            "mcp__zhihuiya-main__suggest_keywords",
+            "mcp__zhihuiya-main__query_classification_helper",
+            "mcp__zhihuiya-main__search_classification_helper",
+            "mcp__zhihuiya-main__search_patents_nested",
+        ]
+
+    # v0.37: 加载 Claude Code 自带的 WebSearch / WebFetch（通用 web 调研用）
     options = ClaudeAgentOptions(
         system_prompt=SYSTEM_PROMPT,
         tools=["WebSearch", "WebFetch"],
-        mcp_servers={"patent-tools": server},
-        allowed_tools=allowed + ["WebSearch", "WebFetch"],
+        mcp_servers=mcp_servers,
+        allowed_tools=allowed + remote_allowed + ["WebSearch", "WebFetch"],
         max_turns=max(max_turns, 25),
         include_partial_messages=True,
     )

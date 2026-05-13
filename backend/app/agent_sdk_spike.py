@@ -349,6 +349,26 @@ def _build_mcp_server():
             return _safe_tool_error("read_kb_file", exc)
 
     @tool(
+        "generate_disclosure",
+        (
+            "按 No.34 模板生成专利交底书 .docx 并落到「AI 输出/专利交底书.docx」。"
+            "**何时调**：(1) 您判断挖掘已经充分、可以出文档了（即等同 `[READY_FOR_DOCX]` 信号）；"
+            "(2) 申请人在 chat 里说『出 docx / 生成交底书 / 给我交底书』等明确指令。"
+            "工具内部会自动抓 0-报门.md + mineFull 5 节 + 上传文件 + 调研下载，按 9 章模板填充。"
+            "调用前请在 chat 简短说一句『我现在出 docx』让申请人有预期；"
+            "调用后系统会自动把 .docx 节点 push 到前端文件树。"
+        ),
+        {"project_id": str},
+    )
+    async def generate_disclosure(args: dict[str, Any]) -> dict:
+        try:
+            return await _do_generate_disclosure(
+                project_id=(args or {}).get("project_id", ""),
+            )
+        except Exception as exc:  # noqa: BLE001
+            return _safe_tool_error("generate_disclosure", exc)
+
+    @tool(
         "update_plan",
         (
             "声明 / 更新你当前轮的工作计划，让申请人在 chat 看到你的 TODO 列表与进度。"
@@ -379,11 +399,16 @@ def _build_mcp_server():
         except Exception as exc:  # noqa: BLE001
             return _safe_tool_error("update_plan", exc)
 
+    # v0.38 Option B: 注入 BigQuery 工具（缺凭证时优雅 skip）
+    from .patents_bq import build_bq_tools_for_server
+    bq_tools, bq_allowed = build_bq_tools_for_server()
+
     server = create_sdk_mcp_server(
         name="patent-tools",
-        version="0.6.0",
+        version="0.8.0",
         tools=[
             update_plan,
+            generate_disclosure,
             search_patents,
             search_trends,
             search_applicants,
@@ -395,10 +420,11 @@ def _build_mcp_server():
             read_user_file,
             search_kb,
             read_kb_file,
-        ],
+        ] + bq_tools,
     )
     allowed = [
         "mcp__patent-tools__update_plan",
+        "mcp__patent-tools__generate_disclosure",
         "mcp__patent-tools__search_patents",
         "mcp__patent-tools__search_trends",
         "mcp__patent-tools__search_applicants",
@@ -410,7 +436,7 @@ def _build_mcp_server():
         "mcp__patent-tools__read_user_file",
         "mcp__patent-tools__search_kb",
         "mcp__patent-tools__read_kb_file",
-    ]
+    ] + bq_allowed
     return server, allowed
 
 
@@ -851,6 +877,117 @@ _RESEARCH_CATEGORY_LABEL = {
     "related_article": "相关文章",
     "note": "调研笔记",
 }
+
+
+async def _do_generate_disclosure(*, project_id: str) -> dict:
+    """v0.37 P1: agent 调用此工具直接生成 No34 模板填充的 .docx 落到「AI 输出/专利交底书.docx」。"""
+    if not project_id:
+        return {"content": [{"type": "text", "text": "project_id 为空"}], "isError": True}
+
+    def _sync_generate() -> dict:
+        from datetime import datetime, timezone
+        from pathlib import Path
+        from .db import SessionLocal
+        from .models import FileNode, Project
+        from .config import settings as _settings
+        from .disclosure_no34 import generate_no34_docx
+
+        db = SessionLocal()
+        try:
+            p = db.get(Project, project_id)
+            if p is None:
+                return {"ok": False, "msg": f"project {project_id} not found"}
+
+            blob = generate_no34_docx(project_id, db)
+
+            # 找/建「AI 输出/」根
+            ai_root_id = f"root-ai-{project_id}"
+            ai_root = db.get(FileNode, ai_root_id)
+            if ai_root is None:
+                return {"ok": False, "msg": "AI 输出 根目录不存在（项目损坏？）"}
+
+            name = "专利交底书.docx"
+            mime = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+
+            # 同名覆盖；保留 file_id 让前端复用引用
+            existing = (
+                db.query(FileNode)
+                .filter(
+                    FileNode.project_id == project_id,
+                    FileNode.parent_id == ai_root.id,
+                    FileNode.name == name,
+                )
+                .first()
+            )
+            now = datetime.now(timezone.utc)
+            if existing:
+                fid = existing.id
+            else:
+                fid = f"f-{uuid.uuid4().hex[:10]}"
+
+            # 写盘
+            storage_dir = Path(_settings.storage_root) / project_id
+            storage_dir.mkdir(parents=True, exist_ok=True)
+            disk_path = storage_dir / f"{fid}.docx"
+            disk_path.write_bytes(blob)
+
+            api_prefix = _settings.api_prefix or "/api"
+            url = f"{api_prefix}/projects/{project_id}/files/{fid}/download"
+
+            if existing:
+                existing.size = len(blob)
+                existing.mime = mime
+                existing.url = url
+                existing.content = None
+                existing.updated_at = now
+            else:
+                node = FileNode(
+                    id=fid,
+                    project_id=project_id,
+                    name=name,
+                    kind="file",
+                    parent_id=ai_root.id,
+                    source="ai",
+                    hidden=False,
+                    mime=mime,
+                    size=len(blob),
+                    url=url,
+                    content=None,
+                    created_at=now,
+                    updated_at=now,
+                )
+                db.add(node)
+
+            # 项目状态推进
+            if p.status in ("drafting", "researching"):
+                p.status = "completed"
+
+            db.commit()
+
+            return {
+                "ok": True,
+                "file_id": fid,
+                "path": f"AI 输出/{name}",
+                "size": len(blob),
+            }
+        except Exception as exc:  # noqa: BLE001
+            db.rollback()
+            logger.exception("generate_disclosure failed")
+            return {"ok": False, "msg": f"生成失败：{type(exc).__name__}: {exc}"}
+        finally:
+            db.close()
+
+    res = await asyncio.to_thread(_sync_generate)
+    if not res.get("ok"):
+        return {"content": [{"type": "text", "text": res.get("msg", "?")}], "isError": True}
+    return {
+        "content": [{
+            "type": "text",
+            "text": f"✓ 已生成交底书 → {res['path']} ({res['size']} bytes)。前端文件树会自动出现该文件，点开右栏即可预览/下载。",
+        }],
+        "file_id": res["file_id"],
+        "path": res["path"],
+    }
 
 
 async def _do_save_research(
