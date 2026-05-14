@@ -99,6 +99,25 @@ export interface Disclosure {
   bodyMarkdown: string;
 }
 
+export interface PlanSnapshotStep {
+  id: string;
+  title: string;
+  status: 'pending' | 'in_progress' | 'completed' | 'failed';
+  started_at?: string | null;
+  completed_at?: string | null;
+  artifact_file_ids?: string[];
+  artifact_file_paths?: string[];
+  artifact_summary?: string | null;
+}
+
+export interface PlanSnapshot {
+  run_id: string;
+  endpoint: 'interview' | 'mine_full';
+  updated_at: string;
+  history_event_seq: number;
+  steps: PlanSnapshotStep[];
+}
+
 export interface Project {
   id: string;
   title: string;
@@ -116,6 +135,7 @@ export interface Project {
   miningSummary?: MiningSummary;
   searchReport?: SearchReport;
   disclosure?: Disclosure;
+  planSnapshot?: PlanSnapshot | null;   // 断点续作：当前 plan + artifact + history_seq
 }
 
 // 文件树节点

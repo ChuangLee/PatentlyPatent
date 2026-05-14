@@ -31,6 +31,7 @@ def _project_to_out(p: Project, with_files: bool = False) -> dict:
         "updatedAt": p.updated_at.isoformat(),
         "intake": p.intake_json, "miningSummary": p.mining_summary_json,
         "searchReport": p.search_report_json, "disclosure": p.disclosure_json,
+        "planSnapshot": p.plan_snapshot_json,
     }
     if with_files:
         out["fileTree"] = [

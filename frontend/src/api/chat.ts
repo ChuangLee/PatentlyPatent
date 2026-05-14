@@ -99,6 +99,17 @@ export const chatApi = {
     }, onEvent, signal);
   },
 
+  /** 断点续作：从上次 plan_snapshot 的下一个未完成 step 接着跑 */
+  interviewResumeStream(projectId: string,
+                        onEvent: (e: ChatStreamEvent) => void,
+                        signal?: AbortSignal): Promise<void> {
+    return consumeSSE(`${_apiBase()}/agent/interview/${projectId}/resume`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: '{}',
+    }, onEvent, signal);
+  },
+
   /**
    * v0.34: detached agent runs — 客户端断开不影响后端 task 跑完，
    * 重新打开页面 SSE tail since=last_seq 即可恢复显示。

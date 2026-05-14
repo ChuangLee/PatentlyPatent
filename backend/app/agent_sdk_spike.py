@@ -376,8 +376,13 @@ def _build_mcp_server():
             '\'[{"id":"s1","title":"查智慧芽 X.509+智能体 命中量","status":"in_progress"},'
             '{"id":"s2","title":"读用户上传 PDF","status":"pending"}]\'。'
             "status 取值：pending / in_progress / completed / failed。"
+            "每个 step 还可选两个字段："
+            '"artifact_files":[\'AI 输出/调研下载/类似专利/CN121xxx.md\']（如果你刚完成这一步并产生了文件，可显式声明）'
+            '；"artifact_summary":"提取出 3 个关键技术点：..."（这一步的核心结论，简短一句话）。'
+            "**通常不必填** artifact_files —— 后端会根据这一步期间你调用 file_write_section / save_research 自动归属。"
             "**铁律**：(1) 任何需要 ≥2 步的工作，开始前必须调一次声明计划；"
-            "(2) 每步开始或完成时调一次更新状态；(3) 在最终交付前所有步骤应为 completed/failed。"
+            "(2) 每步开始或完成时调一次更新状态；(3) 在最终交付前所有步骤应为 completed/failed；"
+            "(4) 续作模式下：保留已 completed 的 step id/title/status 不变，只推进待办部分。"
             "前端会把它渲染为一个 in-place 更新的 Plan 卡片（不会每次都新建卡片）。"
         ),
         {"steps_json": str},
@@ -1087,7 +1092,10 @@ async def _do_save_research(
             "isError": True,
         }
     return {
-        "content": [{"type": "text", "text": f"已保存到 {result['path']}"}],
+        "content": [{
+            "type": "text",
+            "text": f"已保存到 {result['path']}（file_id={result['file_id']}）",
+        }],
         "file_id": result["file_id"],
         "path": result["path"],
     }

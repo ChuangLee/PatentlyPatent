@@ -33,6 +33,8 @@ from ..config import settings
 from ..db import SessionLocal, get_db
 from ..mining import build_prior_art_section_legacy, _DOMAIN_LABEL
 from ..models import AgentEvent, AgentRun, AgentRunLog, FileNode, Project
+from ..plan_snapshot import PlanSnapshotState
+from ..run_archive import dump_run_to_filenode_sync, feed_plan_snapshot
 
 logger = logging.getLogger(__name__)
 
@@ -137,6 +139,9 @@ async def interview(project_id: str, body: InterviewRequest):
 
     - 首轮（history 空）：基于初稿挑 ≤3 个最关键的事实/方向问题
     - 后续轮（带 user_msg + history）：消化用户答 → 续问 ≤3 个 / 或宣告 [READY_FOR_DOCX]
+
+    每次调用都会创建 AgentRun + 每个 event 落 AgentEvent + 维护 plan_snapshot
+    + 结束时 dump 到 .ai-internal/_runs/{run_id}.jsonl
     """
     try:
         ensure_not_blocked()
@@ -157,23 +162,292 @@ async def interview(project_id: str, body: InterviewRequest):
     if body.user_msg:
         history.append({"role": "user", "content": body.user_msg})
 
+    return await _interview_sse_response(
+        project_id=project_id,
+        idea=inputs["idea"],
+        title=inputs["title"],
+        domain=inputs["domain"],
+        sections=inputs["sections"],
+        uploads=inputs["uploads"],
+        history=history,
+    )
+
+
+@router.post("/interview/{project_id}/resume")
+async def interview_resume(project_id: str):
+    """断点续作：从 Project.plan_snapshot_json 拼装 history 摘要 + 已完成/待办列表，
+    复用 interview_stream 但 prompt 头明确告诉 LLM「不要重做已完成步骤」。
+    """
+    try:
+        ensure_not_blocked()
+    except BudgetBlocked as exc:
+        raise HTTPException(503, f"今日预算已超限：${exc.daily_sum:.4f}")
+
+    # 同步取 plan_snapshot + 历史 events
+    def _gather() -> dict | None:
+        from ..plan_snapshot import summarize_for_resume
+        db = SessionLocal()
+        try:
+            proj = db.get(Project, project_id)
+            if not proj:
+                return None
+            snap = proj.plan_snapshot_json
+            if not isinstance(snap, dict) or not snap.get("steps"):
+                return {"error": "no_snapshot"}
+            steps = snap.get("steps") or []
+            pending = [s for s in steps if isinstance(s, dict) and s.get("status") not in ("completed", "failed")]
+            if not pending:
+                return {"error": "all_completed"}
+            # 找 artifact_file_id → 路径 映射
+            ids: set[str] = set()
+            for s in steps:
+                for fid in (s.get("artifact_file_ids") or []):
+                    ids.add(fid)
+            paths: dict[str, str] = {}
+            if ids:
+                rows = (
+                    db.query(FileNode)
+                    .filter(FileNode.project_id == project_id, FileNode.id.in_(ids))
+                    .all()
+                )
+                for r in rows:
+                    paths[r.id] = _resolve_path(db, project_id, r)
+            history_seq = int(snap.get("history_event_seq") or 0)
+            history_events = (
+                db.query(AgentEvent)
+                .filter(
+                    AgentEvent.run_id == snap.get("run_id"),
+                    AgentEvent.seq <= history_seq,
+                )
+                .order_by(AgentEvent.seq.asc())
+                .all()
+            ) if snap.get("run_id") else []
+            condensed_history = _condense_events([
+                {"seq": e.seq, "payload": e.payload} for e in history_events
+            ])
+            resume_head = summarize_for_resume(snap, file_paths_by_id=paths)
+            return {
+                "resume_head": resume_head,
+                "condensed_history": condensed_history,
+                "title": proj.title,
+                "domain": proj.custom_domain or _DOMAIN_LABEL.get(proj.domain or "", proj.domain or "其他"),
+            }
+        finally:
+            db.close()
+
+    data = await asyncio.to_thread(_gather)
+    if data is None:
+        raise HTTPException(404, f"project {project_id} not found")
+    if "error" in data:
+        if data["error"] == "no_snapshot":
+            raise HTTPException(409, "暂无续作进度，请使用「开始挖掘」")
+        if data["error"] == "all_completed":
+            raise HTTPException(409, "上次工作计划已全部完成，请使用「重新挖掘」")
+
+    try:
+        await acquire_sse_slot("interview")
+    except SSEBusy:
+        raise HTTPException(503, "服务繁忙，请稍候")
+
+    inputs = await asyncio.to_thread(_gather_interview_inputs, project_id)
+    if not inputs:
+        release_sse_slot("interview")
+        raise HTTPException(404, f"project {project_id} not found")
+
+    # 把续作头 + 历史摘要拼成 user_msg
+    resume_msg = (
+        f"{data['resume_head']}\n\n"
+        f"## 上次对话摘要\n{data['condensed_history']}\n\n"
+        "请从待办区第一个未完成步骤续作。"
+    )
+    history = [{"role": "user", "content": resume_msg}]
+
+    return await _interview_sse_response(
+        project_id=project_id,
+        idea=inputs["idea"],
+        title=inputs["title"],
+        domain=inputs["domain"],
+        sections=inputs["sections"],
+        uploads=inputs["uploads"],
+        history=history,
+    )
+
+
+def _resolve_path(db: Session, project_id: str, node: FileNode) -> str:
+    """从 FileNode 反向推断「父文件夹/.../文件名」路径（≤3 层）。失败返 name。"""
+    try:
+        parts = [node.name]
+        cur = node
+        for _ in range(5):
+            if not cur.parent_id:
+                break
+            parent = db.get(FileNode, cur.parent_id)
+            if not parent:
+                break
+            parts.insert(0, parent.name)
+            cur = parent
+        return "/".join(parts)
+    except Exception:
+        return node.name
+
+
+def _condense_events(events: list[dict], max_chars: int = 8000) -> str:
+    """把 AgentEvent 流压缩成续作 prompt 友好的对话摘要。
+
+    保留：user 发问 / agent 文本回答（≥30 字段）/ tool_use 名+小结。
+    丢弃：delta（碎片）/ tool_result 全文 / thinking。
+    """
+    lines: list[str] = []
+    text_buf: list[str] = []  # delta 拼接
+    for e in events:
+        payload = e.get("payload") or {}
+        etype = payload.get("type")
+        if etype == "delta":
+            txt = payload.get("text", "")
+            if txt:
+                text_buf.append(txt)
+            continue
+        # 在非 delta 事件处 flush text_buf 作为 agent 回答
+        if text_buf:
+            agent_text = "".join(text_buf).strip()
+            if len(agent_text) >= 30:
+                lines.append(f"[Agent] {agent_text[:600]}")
+            text_buf.clear()
+        if etype == "tool_use":
+            name = payload.get("name") or ""
+            short = name.split("__")[-1] if "__" in name else name
+            inp = payload.get("input") or {}
+            keys = []
+            if isinstance(inp, dict):
+                for k in ("query", "keywords", "keyword", "name", "publication_number"):
+                    if k in inp and inp[k]:
+                        keys.append(f"{k}={str(inp[k])[:80]}")
+                        break
+            lines.append(f"[Tool] {short}({', '.join(keys)})")
+        elif etype == "section_done":
+            lines.append(f"[Section done] {payload.get('name','?')}")
+        elif etype == "error":
+            lines.append(f"[Error] {payload.get('message','?')}")
+    # flush 残留 delta
+    if text_buf:
+        agent_text = "".join(text_buf).strip()
+        if len(agent_text) >= 30:
+            lines.append(f"[Agent] {agent_text[:600]}")
+    out = "\n".join(lines)
+    if len(out) > max_chars:
+        # 尾部截断（保留早期 + 后期信息）
+        keep_head = max_chars // 3
+        keep_tail = max_chars - keep_head - 64
+        out = out[:keep_head] + "\n…（中间已省略）…\n" + out[-keep_tail:]
+    return out or "（上次对话内容已超出保留窗口）"
+
+
+async def _interview_sse_response(
+    *,
+    project_id: str,
+    idea: str,
+    title: str,
+    domain: str,
+    sections,
+    uploads,
+    history: list[dict],
+):
+    """interview / interview-resume 共用 SSE 响应：创建 AgentRun + 全程喂 plan_snapshot + 落 jsonl。"""
+    run_id = _new_run_id()
+    # 创建 AgentRun 行
+    def _create_run():
+        db = SessionLocal()
+        try:
+            db.add(AgentRun(
+                id=run_id,
+                project_id=project_id,
+                endpoint="interview",
+                status="running",
+                idea=(history[-1].get("content") if history else None) or idea[:512],
+            ))
+            db.commit()
+        finally:
+            db.close()
+    await asyncio.to_thread(_create_run)
+
+    snap = PlanSnapshotState(project_id, run_id, "interview")
+    seq = 0
+    last_error: str | None = None
+    total_cost = 0.0
+    total_turns = 0
+
     async def gen():
+        nonlocal seq, last_error, total_cost, total_turns
+        # 首帧告诉前端 run_id（前端可缓存做断线重连）
+        yield {
+            "event": "run_started",
+            "data": json.dumps({"type": "run_started", "run_id": run_id}, ensure_ascii=False),
+        }
         try:
             async for ev in interview_stream(
-                idea=inputs["idea"],
-                title=inputs["title"],
-                domain=inputs["domain"],
-                sections=inputs["sections"],
-                uploads=inputs["uploads"],
+                idea=idea,
+                title=title,
+                domain=domain,
+                sections=sections,
+                uploads=uploads,
                 history=history,
-                project_id=project_id,   # v0.36.4: 让 save_research/read_user_file/file_write_section 拿得到 pid
+                project_id=project_id,
             ):
+                seq += 1
+                # 落 AgentEvent + 喂 plan_snapshot（容错，失败不阻塞流）
+                await asyncio.to_thread(_persist_event_sync, run_id, project_id, seq, ev)
+                await asyncio.to_thread(feed_plan_snapshot, snap, ev, seq)
+                # plan_snapshot 累计后 flush
+                if ev.get("type") in ("tool_use", "tool_result", "done"):
+                    db = SessionLocal()
+                    try:
+                        await asyncio.to_thread(snap.flush, db)
+                    finally:
+                        db.close()
+                etype = ev.get("type")
+                if etype == "done":
+                    if ev.get("total_cost_usd"):
+                        total_cost += float(ev["total_cost_usd"])
+                    if ev.get("num_turns"):
+                        total_turns += int(ev["num_turns"])
+                elif etype == "error":
+                    last_error = ev.get("message")
                 yield {
-                    "event": ev.get("type", "message"),
-                    "data": json.dumps(ev, ensure_ascii=False),
+                    "event": etype or "message",
+                    "data": json.dumps({**ev, "run_id": run_id}, ensure_ascii=False),
                 }
+        except Exception as exc:  # noqa: BLE001
+            last_error = f"{type(exc).__name__}: {exc}"
+            logger.exception("interview run %s failed", run_id)
+            try:
+                yield {
+                    "event": "error",
+                    "data": json.dumps({"type": "error", "message": last_error}, ensure_ascii=False),
+                }
+            except Exception:
+                pass
         finally:
             release_sse_slot("interview")
+            # finalize snap + close AgentRun + dump jsonl
+            def _finalize():
+                db = SessionLocal()
+                try:
+                    snap.finalize(db, "error" if last_error else "completed")
+                finally:
+                    db.close()
+                _update_run_sync(
+                    run_id,
+                    status="error" if last_error else "completed",
+                    finished_at=_dt.datetime.now(_tz.utc),
+                    total_cost_usd=total_cost or None,
+                    num_turns=total_turns or None,
+                    error=last_error,
+                )
+                dump_run_to_filenode_sync(run_id, project_id)
+            try:
+                await asyncio.to_thread(_finalize)
+            except Exception:  # noqa: BLE001
+                logger.warning("interview finalize failed run=%s", run_id, exc_info=True)
             try:
                 await asyncio.to_thread(update_after_run, "interview")
             except Exception:  # noqa: BLE001
@@ -806,11 +1080,21 @@ async def _run_mining_in_background(
     last_error: str | None = None
     cancelled = False
 
+    snap = PlanSnapshotState(project_id, run_id, endpoint) if project_id else None
+
     async def _emit(ev: dict) -> bool:
         """落一条 event；返 False 说明检测到 cancel，应停止。"""
         nonlocal seq
         seq += 1
         await asyncio.to_thread(_persist_event_sync, run_id, project_id, seq, ev)
+        if snap:
+            await asyncio.to_thread(feed_plan_snapshot, snap, ev, seq)
+            if ev.get("type") in ("tool_use", "tool_result", "done", "section_done"):
+                db = SessionLocal()
+                try:
+                    await asyncio.to_thread(snap.flush, db)
+                finally:
+                    db.close()
         # 每条 event 后顺手 check cancel（轻量：单次主键查询）
         st = await asyncio.to_thread(_read_run_status_sync, run_id)
         return st == "running"
@@ -949,6 +1233,22 @@ async def _run_mining_in_background(
             num_turns=total_turns or None,
             error=last_error,
         )
+        # 断点续作：finalize snap + dump jsonl
+        if snap:
+            def _finalize_snap():
+                db = SessionLocal()
+                try:
+                    snap.finalize(db, final_status)
+                finally:
+                    db.close()
+            try:
+                await asyncio.to_thread(_finalize_snap)
+            except Exception as _exc:  # noqa: BLE001
+                logger.warning("plan_snapshot finalize failed: %s", _exc)
+        try:
+            await asyncio.to_thread(dump_run_to_filenode_sync, run_id, project_id)
+        except Exception as _exc:  # noqa: BLE001
+            logger.warning("dump_run_to_filenode failed: %s", _exc)
         # 兼容老 AgentRunLog
         try:
             duration_ms = int((time.monotonic() - t0) * 1000)

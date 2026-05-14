@@ -493,7 +493,38 @@ async function startFirstInterview() {
   await startInterviewTurn(props.projectId, undefined);
 }
 
-defineExpose({ autoMine, mineFull, resumeRun, startFirstInterview });
+/** 断点续作：调 /interview/{pid}/resume，后端拼好 history+plan 摘要拼 prompt 头 */
+async function resumeFromSnapshot() {
+  if (chat.streaming) return;
+  chat.setInterviewActive(true);
+  chat.startAgent();
+  chat.appendThinking('📂 续作中：从上次中断的工作步骤继续…');
+  currentAbort = new AbortController();
+  try {
+    await chatApi.interviewResumeStream(
+      props.projectId,
+      applyAgentEvent,
+      currentAbort.signal,
+    );
+  } catch (err) {
+    chat.appendError('续作失败：' + (err as Error).message);
+  } finally {
+    currentAbort = null;
+    chat.endAgent();
+  }
+  if (readyForWriteRequested.value) {
+    readyForWriteRequested.value = false;
+    chat.appendThinking('✍️ 信息已经够清晰了，我开始写 5 节交底书初稿…');
+    try {
+      const lastUser = chat.messages.filter(m => m.role === 'user').slice(-1)[0]?.content || '（无描述）';
+      await startDetachedRun('mine_full', lastUser, props.projectId);
+    } catch (err) {
+      chat.appendError('写章节失败：' + (err as Error).message);
+    }
+  }
+}
+
+defineExpose({ autoMine, mineFull, resumeRun, startFirstInterview, resumeFromSnapshot });
 </script>
 
 <template>

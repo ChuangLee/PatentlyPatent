@@ -90,6 +90,8 @@ def init_db():
             "CREATE UNIQUE INDEX IF NOT EXISTS ux_users_username ON users(username)",
             # v0.37: file_nodes 补 readonly 列（默认 0，老数据不变）
             "ALTER TABLE file_nodes ADD COLUMN readonly INTEGER DEFAULT 0",
+            # 断点续作：projects 加 plan_snapshot_json（JSON）
+            "ALTER TABLE projects ADD COLUMN plan_snapshot_json JSON",
         ):
             try:
                 conn.execute(text(ddl))

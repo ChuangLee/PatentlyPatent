@@ -38,6 +38,8 @@ class Project(Base):
     mining_summary_json: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     search_report_json: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     disclosure_json: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    # 断点续作：plan snapshot {run_id, endpoint, updated_at, history_event_seq, steps:[]}
+    plan_snapshot_json: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now, onupdate=_now)
 
