@@ -1,17 +1,19 @@
-"""v0.17-A spike: Claude Agent SDK 走专利挖掘单端点（4 工具版）。
+"""Claude Agent SDK 走专利挖掘单端点 — in-process MCP server 装配。
 
-保留 mining.py 老路径不动；本模块独立提供 /api/agent/mine_spike 路由的核心逻辑。
+提供 in-process MCP server 给 agent_interview / agent_section_demo 等路径复用：
+  - update_plan         agent 工作表
+  - generate_disclosure docx 导出
+  - file_write_section  把 markdown 写到 project 文件树
+  - save_research       调研重要素材落「AI 输出/调研下载/<分类>/」
+  - read_user_file      读项目里任意文件（含项目计划.md 等 AI 自己的产出）
+  - file_search_in_project  在项目内模糊搜文件
+  - search_kb / read_kb_file 专利知识库（419 篇 CN 实务）
 
-设计：
-  - 用 SDK 的 @tool 装饰器把 4 个工具包成 in-process MCP server：
-      * search_patents      命中量
-      * search_trends       年度申请趋势
-      * search_applicants   Top 申请人
-      * file_write_section  把 markdown 写到 project 文件树
-  - in-process MCP server（create_sdk_mcp_server），无子进程开销
-  - 没有 ANTHROPIC_API_KEY / use_real_llm=False / SDK 调用失败时，自动 mock 流
-  - 把 SDK 的 AssistantMessage / ToolUseBlock / TextBlock / ResultMessage 翻译成统一 dict
-  - 对外 yield 的事件类型：thinking / tool_use / tool_result / delta / done / error
+智慧芽数据由 agent_interview.py 装配的远程 MCP server（A 路托管 MCP 19 工具）
+负责，本模块不再注入老 in-house REST 工具（套餐欠费后总返 67200005）。
+BigQuery 降级备选见 patents_bq.py。
+
+对外 yield 事件：thinking / tool_use / tool_result / delta / file / done / error。
 """
 from __future__ import annotations
 
@@ -66,15 +68,15 @@ SYSTEM_PROMPT = (
     "你是一名资深专利挖掘助手。用户给出一段技术构思，"
     "你需要：\n"
     "1) 把构思拆成核心技术关键词；\n"
-    "2) 调用 search_patents / search_trends / search_applicants / inventor_ranking 工具，对若干"
-    "关键词组合做命中量、年度趋势、申请人/发明人分布检索；\n"
-    "3) 必要时用 legal_status 查关键公开号的法律状态（有效/失效/审查中）；\n"
-    "4) 必要时用 file_search_in_project 在项目已有文件里搜历史素材；\n"
-    "5) 综合判断新颖性、技术热度、主要竞争对手；\n"
-    "6) 给出 3-5 条可挖掘的差异化角度；\n"
-    "7) 必要时调用 file_write_section 把分析结论写回项目（仅在用户明确要求"
+    "2) 调用 patsnap_search / suggest_keywords 等智慧芽托管 MCP 工具做检索"
+    "（关键词扩展 + 命中专利列表 + 申请人/趋势/分类号）；A 路返业务错时自动"
+    "切 bq_search_patents（Google Patents BigQuery 免费降级）。\n"
+    "3) 必要时用 file_search_in_project 在项目已有文件里搜历史素材；\n"
+    "4) 综合判断新颖性、技术热度、主要竞争对手；\n"
+    "5) 给出 3-5 条可挖掘的差异化角度；\n"
+    "6) 必要时调用 file_write_section 把分析结论写回项目（仅在用户明确要求"
     "保存或调用方传入 project_id 时才写）。\n"
-    "8) 调研中遇到与本创意高度相关的素材（类似已有专利 / 重要论文博客），"
+    "7) 调研中遇到与本创意高度相关的素材（类似已有专利 / 重要论文博客），"
     "调用 save_research(category='similar_patent'|'related_article'|'note') "
     "把要点摘要保存到「AI 输出/调研下载/<分类>/」下，便于员工查阅。\n"
     "保持简洁，工具调用次数不超过 8 次。最后用中文给出结论。"
@@ -89,93 +91,6 @@ def _build_mcp_server():
     返回 (server, tool_names) 二元组，便于注册到 ClaudeAgentOptions。
     """
     from claude_agent_sdk import tool, create_sdk_mcp_server
-
-    @tool(
-        "search_patents",
-        "用智慧芽对一个检索式拿命中量（命中越多越红海）。query 是布尔检索式，例如 'TAC: (区块链 AND 供应链)'。",
-        {"query": str},
-    )
-    async def search_patents(args: dict[str, Any]) -> dict:
-        q = (args or {}).get("query", "").strip()
-        if not q:
-            return {"content": [{"type": "text", "text": "query 为空"}], "isError": True}
-        try:
-            count = await zhihuiya.query_search_count(q)
-        except ZhihuiyaError as exc:
-            return _safe_tool_error("search_patents", exc, q)
-        except Exception as exc:  # noqa: BLE001
-            return _safe_tool_error("search_patents", exc, q)
-        return {
-            "content": [
-                {"type": "text", "text": f'检索式 "{q}" 命中 {count} 件'},
-            ],
-        }
-
-    @tool(
-        "search_trends",
-        "智慧芽：拿一个检索式近 N 年的专利申请年度趋势。返回各年份的命中量列表（最多 10 年）。lang 默认 cn。",
-        {"query": str, "lang": str},
-    )
-    async def search_trends(args: dict[str, Any]) -> dict:
-        q = (args or {}).get("query", "").strip()
-        lang = (args or {}).get("lang") or "cn"
-        if not q:
-            return {"content": [{"type": "text", "text": "query 为空"}], "isError": True}
-        try:
-            data = await zhihuiya.patent_trends(q, lang=lang)
-        except ZhihuiyaError as exc:
-            return _safe_tool_error("search_trends", exc, q)
-        except Exception as exc:  # noqa: BLE001
-            return _safe_tool_error("search_trends", exc, q)
-        # 截到最近 10 年
-        trimmed = data[-10:] if isinstance(data, list) else []
-        text = json.dumps(trimmed, ensure_ascii=False)
-        return {
-            "content": [{"type": "text", "text": text}],
-            "data": trimmed,
-        }
-
-    @tool(
-        "search_applicants",
-        "智慧芽：拿一个检索式下的 Top 10 申请人（机构）排名。返回 [{name, count}, ...]。lang 默认 cn。",
-        {"query": str, "lang": str},
-    )
-    async def search_applicants(args: dict[str, Any]) -> dict:
-        q = (args or {}).get("query", "").strip()
-        lang = (args or {}).get("lang") or "cn"
-        if not q:
-            return {"content": [{"type": "text", "text": "query 为空"}], "isError": True}
-        try:
-            raw = await zhihuiya.applicant_ranking(q, lang=lang, n=10)
-        except ZhihuiyaError as exc:
-            return _safe_tool_error("search_applicants", exc, q)
-        except Exception as exc:  # noqa: BLE001
-            return _safe_tool_error("search_applicants", exc, q)
-        # 字段归一：智慧芽不同接口字段名不一，尽量兜底
-        normalized: list[dict] = []
-        for item in (raw or [])[:10]:
-            if not isinstance(item, dict):
-                continue
-            name = (
-                item.get("name")
-                or item.get("applicant")
-                or item.get("applicant_name")
-                or item.get("title")
-                or ""
-            )
-            cnt = (
-                item.get("count")
-                or item.get("num")
-                or item.get("amount")
-                or item.get("value")
-                or 0
-            )
-            normalized.append({"name": str(name), "count": int(cnt or 0)})
-        text = json.dumps(normalized, ensure_ascii=False)
-        return {
-            "content": [{"type": "text", "text": text}],
-            "data": normalized,
-        }
 
     @tool(
         "file_write_section",
@@ -230,53 +145,6 @@ def _build_mcp_server():
             )
         except Exception as exc:  # noqa: BLE001
             return _safe_tool_error("save_research", exc)
-
-    @tool(
-        "legal_status",
-        (
-            "智慧芽：查一个公开号的法律状态，返回有效/失效/审查中三档计数文本。"
-            "query 是公开号字符串（如 CN112367164B）。"
-        ),
-        {"query": str},
-    )
-    async def legal_status(args: dict[str, Any]) -> dict:
-        q = (args or {}).get("query", "").strip()
-        if not q:
-            return {"content": [{"type": "text", "text": "query 为空"}], "isError": True}
-        try:
-            data = await zhihuiya.simple_legal_status(q)
-        except ZhihuiyaError as exc:
-            return _safe_tool_error("legal_status", exc, q)
-        except Exception as exc:  # noqa: BLE001
-            return _safe_tool_error("legal_status", exc, q)
-        text = _format_legal_status(q, data)
-        return {
-            "content": [{"type": "text", "text": text}],
-            "data": data,
-        }
-
-    @tool(
-        "inventor_ranking",
-        "智慧芽：拿一个检索式下的 Top 10 发明人排名。返回 [{name, count}, ...]。lang 默认 cn。",
-        {"query": str, "lang": str},
-    )
-    async def inventor_ranking(args: dict[str, Any]) -> dict:
-        q = (args or {}).get("query", "").strip()
-        lang = (args or {}).get("lang") or "cn"
-        if not q:
-            return {"content": [{"type": "text", "text": "query 为空"}], "isError": True}
-        try:
-            raw = await zhihuiya.inventor_ranking(q, lang=lang, n=10)
-        except ZhihuiyaError as exc:
-            return _safe_tool_error("inventor_ranking", exc, q)
-        except Exception as exc:  # noqa: BLE001
-            return _safe_tool_error("inventor_ranking", exc, q)
-        normalized = _normalize_inventor_list(raw)
-        text = json.dumps(normalized, ensure_ascii=False)
-        return {
-            "content": [{"type": "text", "text": text}],
-            "data": normalized,
-        }
 
     @tool(
         "file_search_in_project",
@@ -411,17 +279,12 @@ def _build_mcp_server():
 
     server = create_sdk_mcp_server(
         name="patent-tools",
-        version="0.8.0",
+        version="0.9.0",
         tools=[
             update_plan,
             generate_disclosure,
-            search_patents,
-            search_trends,
-            search_applicants,
             file_write_section,
             save_research,
-            legal_status,
-            inventor_ranking,
             file_search_in_project,
             read_user_file,
             search_kb,
@@ -431,77 +294,14 @@ def _build_mcp_server():
     allowed = [
         "mcp__patent-tools__update_plan",
         "mcp__patent-tools__generate_disclosure",
-        "mcp__patent-tools__search_patents",
-        "mcp__patent-tools__search_trends",
-        "mcp__patent-tools__search_applicants",
         "mcp__patent-tools__file_write_section",
         "mcp__patent-tools__save_research",
-        "mcp__patent-tools__legal_status",
-        "mcp__patent-tools__inventor_ranking",
         "mcp__patent-tools__file_search_in_project",
         "mcp__patent-tools__read_user_file",
         "mcp__patent-tools__search_kb",
         "mcp__patent-tools__read_kb_file",
     ] + bq_allowed
     return server, allowed
-
-
-# ─── tool 辅助：格式化 / 归一化 ───────────────────────────────────────────────
-
-
-def _format_legal_status(q: str, data: dict) -> str:
-    """智慧芽 simple-legal-status 字段名各版本不一，尽量兜底成有效/失效/审查中三档。"""
-    if not isinstance(data, dict):
-        return f'公开号 "{q}" 无法律状态数据'
-    # 常见字段：active / inactive / pending；或 valid / invalid / examining；或中文 key
-    def _pick(*keys, default=None):
-        for k in keys:
-            if k in data and data[k] is not None:
-                return data[k]
-        return default
-
-    active = _pick("active", "valid", "有效", "in_force", default=None)
-    inactive = _pick("inactive", "invalid", "失效", "expired", "lapsed", default=None)
-    pending = _pick("pending", "examining", "审查中", "in_examination", default=None)
-
-    # 若顶层没有这三档，再尝试 data.statistics / data.summary 一类
-    if active is None and inactive is None and pending is None:
-        nested = data.get("statistics") or data.get("summary") or {}
-        if isinstance(nested, dict):
-            active = nested.get("active") or nested.get("valid")
-            inactive = nested.get("inactive") or nested.get("invalid")
-            pending = nested.get("pending") or nested.get("examining")
-
-    parts = [f'公开号 "{q}" 法律状态：']
-    parts.append(f"  - 有效：{active if active is not None else '?'}")
-    parts.append(f"  - 失效：{inactive if inactive is not None else '?'}")
-    parts.append(f"  - 审查中：{pending if pending is not None else '?'}")
-    # 把 raw 也带一份，方便 LLM 看到
-    parts.append(f"  (raw: {json.dumps(data, ensure_ascii=False)[:200]})")
-    return "\n".join(parts)
-
-
-def _normalize_inventor_list(raw: list) -> list[dict]:
-    out: list[dict] = []
-    for item in (raw or [])[:10]:
-        if not isinstance(item, dict):
-            continue
-        name = (
-            item.get("name")
-            or item.get("inventor")
-            or item.get("inventor_name")
-            or item.get("title")
-            or ""
-        )
-        cnt = (
-            item.get("count")
-            or item.get("num")
-            or item.get("amount")
-            or item.get("value")
-            or 0
-        )
-        out.append({"name": str(name), "count": int(cnt or 0)})
-    return out
 
 
 # ─── file_search_in_project 业务实现 ─────────────────────────────────────────

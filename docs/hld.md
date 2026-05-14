@@ -156,14 +156,13 @@ graph TB
         A_MINING[mining.py<br/>兼容层 + legacy fallback]
     end
 
-    subgraph MCP[MCP 工具]
+    subgraph MCP[MCP 工具 30]
         T_REMOTE_LOGIC[A 路 Zhihuiya logic-mcp ×2<br/>patsnap_search / patsnap_fetch<br/>HTTP streamable，收费]
         T_REMOTE_MAIN[A 路 Zhihuiya main-mcp ×17<br/>分类号 / 同义词扩展 / 申请人 / 图像 / 嵌套<br/>HTTP streamable，收费]
         T_BQ[B 路 BigQuery ×2<br/>bq_search_patents / bq_patent_detail<br/>免费，CN 全量降级备选]
-        T_ZHY[in-house 智慧芽 ×5<br/>search/count/trends/applicants/legal]
-        T_KB[kb ×2<br/>kb_search / kb_read]
-        T_FILES[project files ×4<br/>file_read / file_write_section<br/>file_list / file_delete]
-        T_PLAN[update_plan ×1<br/>派生 plan 卡片]
+        T_KB[kb ×2<br/>search_kb / read_kb_file]
+        T_FILES[project files ×4<br/>read_user_file / file_search_in_project<br/>file_write_section / save_research]
+        T_PLAN[update_plan / generate_disclosure ×2]
         T_WEB[WebSearch / WebFetch ×2<br/>Claude Code 内置]
     end
 
@@ -199,9 +198,8 @@ graph TB
 | --- | --- |
 | `agent_interview.py` | interview-first 状态机驱动；多轮问答 → 触发写作；主流程入口；装配 in-process + remote MCP 服务 |
 | `agent_section_demo.py` | 5 节 section_prompt 模板 + `mine_section_via_agent`；被 interview「ready_for_write」状态调用 |
-| `agent_sdk_spike.py` | `claude-agent-sdk` 适配层；SDK 事件 → SSE 翻译；in-process MCP server 装配（智慧芽 in-house + kb + project files + update_plan + BigQuery 降级路） |
+| `agent_sdk_spike.py` | `claude-agent-sdk` 适配层；SDK 事件 → SSE 翻译；in-process MCP server 装配（update_plan + generate_disclosure + 项目文件 4 + kb 2 + BigQuery 2，共 10 个）；不再注入老 in-house REST 工具（套餐欠费） |
 | `patents_bq.py` | Google Patents BigQuery adapter（B 路降级）；`is_available()` 检测凭证，缺则工具不暴露给 agent，行为静默回退 |
-| `zhihuiya.py` | 智慧芽 in-house REST 封装（query-search-count / insights/* / simple-legal-status 等）；TTL cache 10s |
 | `mining.py` | legacy 占位骨架兜底；agent 失败时 `AgentRunLog.fallback=True` |
 | `budget.py` / `concurrency.py` | 日预算 + SSE 并发；接入 interview/mine_full 双入口 |
 
@@ -712,12 +710,6 @@ graph TB
 | **B 路 — BigQuery 降级备选（A 路业务错时使用）** ||||
 | B1 | `bq_search_patents` | `keyword, country=CN, year_from=2020, limit≤50` | `[{publication_number, title_zh, abstract_zh, assignee, filing_date, country_code}]` | BigQuery slot；按扫描字节计费（免费层 1TB/月） |
 | B2 | `bq_patent_detail` | `publication_number` | title/abstract/claims/description/assignee/ipc/citations 中文 | 同上；description ≤8000 字、claims ≤4000 字截断 |
-| **in-house 智慧芽 REST 兜底** ||||
-| C1 | `search_patents` | `query: str` | 命中量 | REST `/query-search-count` |
-| C2 | `search_trends` | `query, lang?` | `[{year, count}]` × 10 | REST `/insights/trends` |
-| C3 | `search_applicants` | `query, lang?` | `[{name, count}]` × 10 | REST `/insights/applicant-ranking` |
-| C4 | `inventor_ranking` | `query, lang?` | `[{name, count}]` × 10 | REST `/insights/inventor-ranking` |
-| C5 | `legal_status` | 公开号 | 有效/失效/审查中 | REST `/simple-legal-status` |
 | **Web / KB / 项目文件 / 计划** ||||
 | D1 | `WebSearch` | `query` | 网页结果 | Claude Code 内置 |
 | D2 | `WebFetch` | `url, prompt` | 抓取 + LLM 总结 | Claude Code 内置 |
@@ -898,7 +890,7 @@ graph LR
 | # | 风险 | 影响 | 缓解 |
 | --- | --- | --- | --- |
 | R-1 | **claude CLI OAuth 凭证过期**（30+ 天） | agent 路径全挂；启动期硬校验失败 → 服务拒启 | 监控 `journalctl` 启动失败；deploy_runbook 续期 SOP；备份 `.credentials.json.bak.vN`；监控 `agent_runs.fallback_used` 上升 |
-| R-2 | **智慧芽 quota 月度耗尽 / 业务错** | A 路 search 工具不可用 | SYSTEM_PROMPT 引导切 B 路 BigQuery；in-house REST `_safe_query` 4 场景兜底 + LRU TTL cache 300s；admin Dashboard 看 fallback |
+| R-2 | **智慧芽 A 路 quota 月度耗尽 / 业务错** | A 路 19 个 MCP 工具不可用 | SYSTEM_PROMPT 引导切 B 路 BigQuery（免费降级）；admin Dashboard 看 fallback；告警 cost 突变 |
 | R-3 | **BigQuery 凭证 / API 未启用** | B 路降级不可用 | `is_available()` 静默回退到 A 路；启动日志显式打印凭证就位状态；deploy_runbook 含 GCP 启用步骤 |
 | R-4 | **SDK 版本升级** | 字段重命名 / 事件类型变化打破 SSE 翻译层 | 版本锁定 `pyproject.toml`；升级先在 dev 跑真路径冒烟；保留 `mining.py` 兼容层作回退 |
 | R-5 | **并发 SSE 资源耗尽** | 同 host CPU/连接堆积 | Semaphore=5 硬上限；nginx `proxy_read_timeout 600s`；客户端 AbortController 优雅取消 |

@@ -18,7 +18,6 @@ flowchart LR
     CLI --> ANT[Anthropic API]
     CLI -->|A 路 MCP HTTP| ZHY[智慧芽 connect.zhihuiya.com<br/>logic-mcp + main-mcp]
     CLI -.A 业务错降级.-> BQ[Google BigQuery<br/>patents-public-data]
-    API -->|in-house REST 兜底| ZHY_REST[智慧芽 REST]
 ```
 
 ---
@@ -227,7 +226,7 @@ curl -s "https://blind.pub/patent/api/admin/budget_status" | jq
 - 静态部署：`/var/www/patent/`（nginx 直供，base=`/patent/`）
 - DB：SQLite WAL `backend/patentlypatent.db`，并发读 + 单写
 - 文件上传：`backend/storage/uploads/<pid>/<fid>/<name>`
-- 智慧芽 in-house REST cache：LRU TTL 300s / max 256 entries
+- 智慧芽：仅走 A 路 hosted MCP（apikey 在 URL）；老 in-house REST 工具已下线
 - SSE 并发：Semaphore 5；日预算 warn $2 / block $10
 - agent SDK 默认 max_turns：interview 8 / mine_full 5
 

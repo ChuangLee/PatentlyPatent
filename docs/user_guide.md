@@ -54,7 +54,6 @@
 AI 用的工具：
 - **A 路 智慧芽托管 MCP**（首选）：`patsnap_search` 关键词/语义检索 / `patsnap_fetch` 拉权要法律同族 / `suggest_keywords` 同义词扩展 / 分类号/申请人/图像/嵌套等共 19 个工具
 - **B 路 BigQuery 降级备选**：`bq_search_patents` / `bq_patent_detail`（Google Patents 全量，中文译本，免费；A 路业务错时自动启用）
-- in-house 智慧芽 REST 兜底：`search_patents`（命中量）/ `search_trends`（年度趋势）/ `search_applicants`（Top 申请人）/ `inventor_ranking` / `legal_status`
 - 通用 Web：`WebSearch` / `WebFetch`（W3C/IETF 标准、同行开源、技术博客）
 - 内置 kb：`search_kb` / `read_kb_file`（419 篇 CN 实务）
 - 项目文件：`read_user_file`（读 PDF/pptx/docx/xlsx 全文）/ `file_search_in_project` / `save_research`（落关键文献到「AI 输出/调研下载/」）/ `file_write_section`

@@ -248,7 +248,7 @@ flowchart TB
 | F-16 | **kb 只读浏览** | 419 文件 / 37 子目录 / 92.7MB | ✅ |
 | F-17 | **资深代理人 persona** | CN+US 双轨执业 10 年；硬性调研门槛 + 5 决策点 + A22/A26/R20.2 法条体检 | ✅ |
 | F-18 | **专利检索 A+B 双路** | A 路智慧芽托管 MCP（logic 2 + main 17 = 19 工具）；B 路 Google Patents BigQuery 降级（免费，CN 全量）；A 路业务错时自动切 B | ✅ |
-| F-19 | **MCP 工具全集** | A+B 19+2 + in-process 智慧芽 in-house 5 + WebSearch/WebFetch + kb 2 + project files 4 + update_plan = 35 工具 | ✅ |
+| F-19 | **MCP 工具全集** | A 路托管 MCP 19 + B 路 BigQuery 2 + WebSearch/WebFetch 2 + kb 2 + project files 4 + update_plan/generate_disclosure 2 = **30 工具**（in-house REST 5 个老工具因套餐欠费总返 67200005 已下线） | ✅ |
 | F-20 | **真 token 级流** | SDK include_partial_messages=True + tool_use_id 关联 + plan 卡 sticky | ✅ |
 | F-21 | **可折叠"调研过程"分组** | 连续 thinking + tool_call 合并默认折叠，AI 文本独立气泡 | ✅ |
 | F-22 | **markdown + mermaid 渲染** | marked GFM + DOMPurify + 动态 mermaid SVG（chat + 文件预览） | ✅ |
@@ -544,7 +544,7 @@ graph LR
 | --- | --- | --- | --- |
 | **LLM 幻觉写出错误专利分类号** | 中 | 高（误导员工） | persona 强约束 + kb 419 篇范本 + admin Dashboard fallback 监控 + docx 显式 disclaimer |
 | **claude CLI OAuth 凭证过期** | 中 | 高（全站 LLM 失效） | deploy_runbook.md 续期 SOP + Sentry 告警（计划） |
-| **智慧芽 API 限流 / 改字段** | 中 | 中 | A 路智慧芽托管 MCP 业务错时自动切 B 路 Google Patents BigQuery；in-house wrap 端点 TTL cache（10s） |
+| **智慧芽 API 限流 / 改字段** | 中 | 中 | A 路智慧芽托管 MCP 业务错时自动切 B 路 Google Patents BigQuery |
 | **SSE 长连接被 nginx/网关切断** | 中 | 中 | nginx proxy_buffering off + detached run + 重连 ?from=N |
 | **员工上传敏感商业秘密外泄** | 低 | 高 | 全程不出企业内网 + LLM 走 claude CLI（无第三方 SDK 中转）+ 文件 sanitize |
 | **日 cost 超 $10 击穿** | 低 | 中 | budget block 硬阻断 + warn $2 早期预警 + admin 可调 env |
