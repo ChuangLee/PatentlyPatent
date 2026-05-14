@@ -16,6 +16,7 @@ import FilePreviewer from '@/components/workbench/FilePreviewer.vue';
 import ReadonlyBanner from '@/components/common/ReadonlyBanner.vue';
 import { filesApi } from '@/api/files';
 import { takePendingUploads } from '@/stores/uploadQueue';
+import { apiClient } from '@/api/client';
 import message from 'ant-design-vue/es/message';
 import { useUIStore } from '@/stores/ui';
 import type { Project, ProjectStatus, FileNode } from '@/types';
@@ -101,6 +102,24 @@ async function restartFromScratch() {
 watch(() => files.currentFileId, (id) => {
   if (id && ui.previewMode === 'closed') ui.openPreview();
 });
+
+/** 下载当前预览的文件 —— 走 backend download endpoint（disclosure docx / 上传 PDF / agent md 全都通） */
+const previewedNode = computed<FileNode | null>(() => files.currentNode);
+const canDownloadPreview = computed(() => !!previewedNode.value && previewedNode.value.kind === 'file');
+function downloadPreviewedFile() {
+  const n = previewedNode.value;
+  if (!n || !files.projectId) return;
+  const base = (apiClient.defaults.baseURL ?? '/api').replace(/\/$/, '');
+  const url = `${base}/projects/${files.projectId}/files/${n.id}/download`;
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = n.name;
+  a.target = '_blank';
+  a.rel = 'noopener noreferrer';
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+}
 
 /** v0.21 任务 1: 触发 mine_full 一键端到端 */
 async function runFullMining() {
@@ -356,6 +375,9 @@ function onRoundComplete() {
       <div class="pp-preview-header">
         <span class="pp-preview-title">📎 文件预览</span>
         <a-space :size="4">
+          <a-tooltip title="下载">
+            <a-button size="small" type="text" :disabled="!canDownloadPreview" @click="downloadPreviewedFile">⬇</a-button>
+          </a-tooltip>
           <a-tooltip title="全屏">
             <a-button size="small" type="text" @click="ui.togglePreviewFullscreen">⛶</a-button>
           </a-tooltip>
@@ -387,6 +409,9 @@ function onRoundComplete() {
       <div class="pp-preview-header pp-preview-header-drawer">
         <span class="pp-preview-title">📎 文件预览</span>
         <a-space :size="4">
+          <a-tooltip title="下载当前文件">
+            <a-button size="small" type="text" :disabled="!canDownloadPreview" @click="downloadPreviewedFile">⬇ 下载</a-button>
+          </a-tooltip>
           <a-tooltip :title="ui.previewMode === 'fullscreen' ? '退出全屏' : '全屏'">
             <a-button size="small" type="text" @click="ui.togglePreviewFullscreen">
               {{ ui.previewMode === 'fullscreen' ? '⛶ 退出全屏' : '⛶ 全屏' }}
