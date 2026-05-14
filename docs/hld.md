@@ -698,7 +698,7 @@ graph TB
 
     subgraph Server[Linux 主机]
         subgraph Nginx[nginx]
-            NG_STATIC[/var/www/patent<br/>静态 SPA<br/>base=/patent/]:::ng
+            NG_STATIC["/var/www/patent<br/>静态 SPA<br/>base=/patent/"]:::ng
             NG_PROXY[location /api/<br/>proxy_pass 127.0.0.1:8088<br/>proxy_buffering off]:::ng
         end
 

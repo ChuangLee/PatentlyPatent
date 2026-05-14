@@ -11,7 +11,7 @@
 ```mermaid
 flowchart LR
     U[浏览器用户] --> NG[nginx<br/>blind.pub/patent<br/>proxy_buffering off]
-    NG -->|静态| S[/var/www/patent/<br/>Vue dist]
+    NG -->|静态| S["/var/www/patent/<br/>Vue dist"]
     NG -->|/api/*| API[FastAPI :8088<br/>systemd unit<br/>uvicorn]
     API --> DB[(SQLite WAL<br/>backend/patentlypatent.db)]
     API -->|spawn| CLI[claude CLI<br/>子进程<br/>OAuth ~/.claude]
