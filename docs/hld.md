@@ -622,7 +622,7 @@ graph TB
     end
 
     subgraph PlanT[计划 ×1]
-        P1[update_plan steps[] → harness 派生汇报]:::plan
+        P1["update_plan steps → harness 派生汇报"]:::plan
     end
 
     AGENT --> LOGIC & MAIN
