@@ -29,25 +29,22 @@ export const useFilesStore = defineStore('files', () => {
     catch { return []; }
   }
 
-  /** 切换项目；若已有缓存使用缓存，否则用传入的 initialTree（来自 fixture），否则建默认树
-   *  v0.37: 若 initialTree 比 cache 有更多 ROOT（如新加的"本系统文档"），用 initialTree 覆盖 cache，
-   *  避免 schema 升级后旧浏览器缓存遮蔽新根目录 */
+  /** 切换项目；服务端 initialTree 始终是权威数据源，sessionStorage 仅在 initialTree
+   *  不可用时兜底（首屏离线打开等）。之前优先 cache 会导致服务端更新（如系统文档修复）
+   *  被旧缓存遮蔽。 */
   function attach(pid: string, initialTree?: FileNode[]) {
     projectId.value = pid;
-    const cached = load(pid);
-    const initialRoots = initialTree ? initialTree.filter(n => n.parentId == null).length : 0;
-    const cachedRoots = cached.filter(n => n.parentId == null).length;
-    if (initialTree && initialTree.length && initialRoots > cachedRoots) {
-      tree.value = [...initialTree];
-      persist();
-    } else if (cached.length) {
-      tree.value = cached;
-    } else if (initialTree && initialTree.length) {
+    if (initialTree && initialTree.length) {
       tree.value = [...initialTree];
       persist();
     } else {
-      tree.value = buildDefaultTree();
-      persist();
+      const cached = load(pid);
+      if (cached.length) {
+        tree.value = cached;
+      } else {
+        tree.value = buildDefaultTree();
+        persist();
+      }
     }
     currentFileId.value = null;
   }
