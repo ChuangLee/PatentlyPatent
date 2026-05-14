@@ -26,6 +26,7 @@ import {
 } from '@ant-design/icons-vue';
 import { useFilesStore } from '@/stores/files';
 import { filesApi } from '@/api/files';
+import { projectsApi } from '@/api/projects';
 import { kbApi } from '@/api/kb';
 import type { FileNode, FileMime } from '@/types';
 
@@ -683,16 +684,23 @@ function deleteSelected() {
   confirmRemove(id);
 }
 
-// 工具栏：刷新（重置缓存重新装载）
-function refreshTree() {
+// 工具栏：刷新 —— 真去服务端拉最新文件树
+const refreshing = ref(false);
+async function refreshTree() {
   const pid = files.projectId;
-  if (!pid) return;
-  // 清 sessionStorage，重 attach
-  sessionStorage.removeItem('pp.files.' + pid);
-  // 触发重新装载需要 initialTree——这里我们重新用现 tree 备份再 attach 等价
-  const backup = JSON.parse(JSON.stringify(files.tree));
-  files.attach(pid, backup);
-  message.success('已刷新');
+  if (!pid || refreshing.value) return;
+  refreshing.value = true;
+  try {
+    sessionStorage.removeItem('pp.files.' + pid);
+    const fresh = await projectsApi.get(pid);
+    const tree = (fresh as any).fileTree || [];
+    files.attach(pid, tree);
+    message.success(`已刷新（${tree.length} 个节点）`);
+  } catch (e: any) {
+    message.error('刷新失败：' + (e?.message || e));
+  } finally {
+    refreshing.value = false;
+  }
 }
 
 function toggleWrap() { wrapNames.value = !wrapNames.value; }

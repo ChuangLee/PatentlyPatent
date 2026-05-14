@@ -35,6 +35,8 @@ from ..mining import build_prior_art_section_legacy, _DOMAIN_LABEL
 from ..models import AgentEvent, AgentRun, AgentRunLog, FileNode, Project
 from ..plan_snapshot import PlanSnapshotState
 from ..run_archive import dump_and_purge_events_sync, feed_plan_snapshot, read_run_events_sync
+from ..run_archive import _FILE_ID_RE
+from ..schemas import FileNodeOut
 
 logger = logging.getLogger(__name__)
 
@@ -368,6 +370,33 @@ async def _interview_sse_response(
     last_error: str | None = None
     total_cost = 0.0
     total_turns = 0
+    emitted_file_ids: set[str] = set()
+
+    def _fetch_file_node_payload(pid: str, fid: str) -> dict | None:
+        from .. import models as _m
+        db_local = SessionLocal()
+        try:
+            n = db_local.query(_m.FileNode).filter(
+                _m.FileNode.project_id == pid, _m.FileNode.id == fid,
+            ).first()
+            if not n:
+                return None
+            return FileNodeOut.model_validate(n).model_dump(by_alias=True)
+        finally:
+            db_local.close()
+
+    def _lookup_plan_md_id(pid: str) -> str | None:
+        from .. import models as _m
+        db_local = SessionLocal()
+        try:
+            node = (
+                db_local.query(_m.FileNode)
+                .filter(_m.FileNode.project_id == pid, _m.FileNode.name == "项目计划.md")
+                .first()
+            )
+            return node.id if node else None
+        finally:
+            db_local.close()
 
     async def gen():
         nonlocal seq, last_error, total_cost, total_turns
@@ -409,6 +438,29 @@ async def _interview_sse_response(
                     "event": etype or "message",
                     "data": json.dumps({**ev, "run_id": run_id}, ensure_ascii=False),
                 }
+                # 派生 file 事件 — 让前端实时把新文件加到树
+                derived_file_ids: list[str] = []
+                if etype == "tool_result":
+                    for fid in _FILE_ID_RE.findall(ev.get("text", "") or ""):
+                        if fid not in emitted_file_ids:
+                            derived_file_ids.append(fid)
+                # 项目计划.md：每次 update_plan 调用后 lookup（snap.flush 已落地）
+                if etype == "tool_use" and "update_plan" in (ev.get("name", "") or ""):
+                    plan_fid = await asyncio.to_thread(_lookup_plan_md_id, project_id)
+                    if plan_fid and plan_fid not in emitted_file_ids:
+                        derived_file_ids.append(plan_fid)
+                for fid in derived_file_ids:
+                    node = await asyncio.to_thread(_fetch_file_node_payload, project_id, fid)
+                    if not node:
+                        continue
+                    emitted_file_ids.add(fid)
+                    seq += 1
+                    file_ev = {"type": "file", "node": node}
+                    await asyncio.to_thread(_persist_event_sync, run_id, project_id, seq, file_ev)
+                    yield {
+                        "event": "file",
+                        "data": json.dumps({**file_ev, "run_id": run_id}, ensure_ascii=False),
+                    }
         except Exception as exc:  # noqa: BLE001
             last_error = f"{type(exc).__name__}: {exc}"
             logger.exception("interview run %s failed", run_id)
