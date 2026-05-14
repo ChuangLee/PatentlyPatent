@@ -36,9 +36,15 @@ const restartMining = ref(false);
 
 const isReadonly = computed(() => auth.role === 'admin');
 
-/** v0.37: 是否已有挖掘历史（用于决定按钮显示"开始"还是"重新"） */
+/** v0.37: 是否已有挖掘历史（用于决定按钮显示"开始"还是"重新"）
+ * 只算 text 类正经对话；上传进度 thinking / tool_call / step_done 等系统派生消息不算
+ */
 const hasMiningHistory = computed(() =>
-  chat.messages.some(m => m.role === 'user' || m.role === 'agent' && (m.content || '').trim()),
+  chat.messages.some(m => {
+    const t = m.type ?? 'text';
+    if (t !== 'text') return false;
+    return (m.role === 'user' || m.role === 'agent') && !!(m.content || '').trim();
+  }),
 );
 
 /** 断点续作：有 plan_snapshot 且仍有未完成 step（既不是 completed 也不是 failed） */
@@ -287,9 +293,13 @@ onMounted(async () => {
       }
       await new Promise(r => setTimeout(r, 100));
       if (!chatRef.value || chat.streaming) return;
-      const hasUserMsg = chat.messages.some(m => m.role === 'user');
-      const hasAgentMsg = chat.messages.some(m => m.role === 'agent' && (m.content || '').trim());
-      if (hasUserMsg || hasAgentMsg) return;   // 已有挖掘历史不自动重跑
+      // 只算 text 类正经对话；上传进度 thinking / tool_call / step_done 等不算
+      const hasRealHistory = chat.messages.some(m => {
+        const t = m.type ?? 'text';
+        if (t !== 'text') return false;
+        return (m.role === 'user' || m.role === 'agent') && !!(m.content || '').trim();
+      });
+      if (hasRealHistory) return;   // 已有真挖掘历史不自动重跑
       if (ui.agentMode === 'agent_sdk') {
         chatRef.value.startFirstInterview().catch((e: any) => {
           console.warn('[auto startInterview on fresh project] failed:', e?.message || e);
