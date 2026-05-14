@@ -173,17 +173,25 @@ def download_file(pid: str, fid: str, db: Session = Depends(get_db)):
     f = db.get(FileNode, fid)
     if not f or f.project_id != pid:
         raise HTTPException(404, "file not found")
-    if not (f.url or "").startswith(UPLOAD_BASE_URL):
-        # 非二进制（content 文本类）
-        if f.content is not None:
-            from fastapi.responses import PlainTextResponse
-            return PlainTextResponse(f.content, media_type=f.mime or "text/plain")
-        raise HTTPException(404, "no binary stored (legacy file metadata only)")
-    p = _storage_path(pid, fid, f.name)
-    if not p.exists():
-        raise HTTPException(404, "binary missing on disk")
-    mime = f.mime or _infer_mime(f.name)
-    headers = {
-        "Content-Disposition": f"inline; filename*=utf-8''{quote(f.name)}"
-    }
-    return FileResponse(p, media_type=mime, headers=headers)
+    # 1) 用户上传的二进制：storage/uploads/{pid}/{fid}/{name}
+    if (f.url or "").startswith(UPLOAD_BASE_URL):
+        p = _storage_path(pid, fid, f.name)
+        if not p.exists():
+            raise HTTPException(404, "binary missing on disk")
+        mime = f.mime or _infer_mime(f.name)
+        return FileResponse(p, media_type=mime, headers={
+            "Content-Disposition": f"inline; filename*=utf-8''{quote(f.name)}",
+        })
+    # 2) agent / 系统生成的二进制：storage/{pid}/{fid}.{ext}（disclosure 生成的 docx 等）
+    ext = Path(f.name).suffix or ".bin"
+    candidate = settings.storage_root / pid / f"{fid}{ext}"
+    if candidate.exists():
+        mime = f.mime or _infer_mime(f.name)
+        return FileResponse(candidate, media_type=mime, headers={
+            "Content-Disposition": f"inline; filename*=utf-8''{quote(f.name)}",
+        })
+    # 3) 文本类（content 字段）
+    if f.content is not None:
+        from fastapi.responses import PlainTextResponse
+        return PlainTextResponse(f.content, media_type=f.mime or "text/plain")
+    raise HTTPException(404, "no binary stored (legacy file metadata only)")
