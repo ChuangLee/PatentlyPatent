@@ -27,19 +27,16 @@ const docxError = ref<string>('');
 async function loadDocxPreview(n: FileNode) {
   docxHtml.value = '';
   docxError.value = '';
-  if (!n.url) {
+  const pid = files.projectId;
+  if (!pid || !n.id) {
     docxError.value = '未提供下载地址';
     return;
   }
   docxLoading.value = true;
   try {
-    // node.url 形如 '/api/projects/:id/files/:fid/download'，
-    // apiClient.baseURL 默认 '/api'，需要剥掉前缀以匹配 baseURL
-    let url = n.url;
-    const base = (apiClient.defaults.baseURL ?? '/api').replace(/\/$/, '');
-    if (base && url.startsWith(base + '/')) {
-      url = url.slice(base.length);
-    }
+    // 直接拼 apiClient 风格的相对路径，绕开 node.url 字段（旧 url 形如 '/api/...'，
+    // prod baseURL='/patent/api'，拼起来会变 '/patent/api/api/...' 双前缀 404）
+    const url = `/projects/${pid}/files/${n.id}/download`;
     const resp = await apiClient.get(url, { responseType: 'arraybuffer' });
     const arrayBuffer = resp.data as ArrayBuffer;
     // 动态 import 以减少首屏体积
@@ -187,26 +184,18 @@ function isUploadedBinary(n: FileNode): boolean {
   return !!n.url && n.url.startsWith('local-upload://');
 }
 
-/** v0.32: 后端下载/inline 端点 URL（pdf iframe / img src / a-tag download 用） */
+/** 后端下载端点完整 URL，兼容 dev (/api) 和 prod (/patent/api)。
+ * 任何项目文件都走这个（disclosure 生成的 docx / 上传文件 / AI 写入等）。*/
 function backendDownloadUrl(n: FileNode): string {
-  // url 形如 'local-upload://<pid>/<fid>'
-  if (!isUploadedBinary(n)) return '';
-  const tail = n.url!.slice('local-upload://'.length);
-  return `/patent/api/projects/${tail.split('/')[0]}/files/${tail.split('/')[1]}/download`;
+  const pid = files.projectId;
+  if (!pid || !n.id) return '';
+  const base = (apiClient.defaults.baseURL ?? '/api').replace(/\/$/, '');
+  return `${base}/projects/${pid}/files/${n.id}/download`;
 }
 
 function downloadAsFile(n: FileNode) {
-  // 优先：后端 multipart 上传的二进制 → 直链下载
-  if (isUploadedBinary(n)) {
-    const a = document.createElement('a');
-    a.href = backendDownloadUrl(n);
-    a.download = n.name;
-    a.target = '_blank';
-    a.click();
-    return;
-  }
-  // 内联文本（content 字段）
-  if (n.content !== undefined) {
+  // 内联文本（content 字段）—— 不走服务端；docx 仍要走服务端避免 content=NULL 漏空
+  if (n.content !== undefined && n.content !== null && !isUploadedBinary(n) && n.mime !== DOCX_MIME) {
     const blob = new Blob([n.content], { type: n.mime ?? 'text/plain' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
@@ -216,7 +205,17 @@ function downloadAsFile(n: FileNode) {
     setTimeout(() => URL.revokeObjectURL(url), 100);
     return;
   }
-  // url 类型（链接 / 占位）
+  // 项目内文件（含 disclosure docx / 上传文件 / agent 写入）→ 走 backendDownloadUrl
+  const url = backendDownloadUrl(n);
+  if (url) {
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = n.name;
+    a.target = '_blank';
+    a.click();
+    return;
+  }
+  // 兜底：外链
   if (n.url) window.open(n.url, '_blank');
 }
 </script>
