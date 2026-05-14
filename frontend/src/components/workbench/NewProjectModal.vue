@@ -259,7 +259,7 @@ async function onOk() {
     emit('created', p.id);
     emit('update:open', false);
     reset();
-    router.push(`/employee/projects/${p.id}/workbench`);
+    router.push(`/employee/projects/${p.id}/workbench?fresh=1`);
   } catch (e) {
     message.error('创建失败：' + (e as Error).message);
   } finally {

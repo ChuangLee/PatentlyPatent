@@ -240,9 +240,11 @@ onMounted(async () => {
     }
   }
 
-  // 自动启动挖掘：新建项目（无挖掘历史）+ 附件上传完毕 → 自动跑 interview-first
-  // 已有挖掘历史的项目（用户后续返回）走「重新挖掘」按钮手动触发
-  if (!resumed && project.value && project.value.status !== 'completed' && !isReadonly.value) {
+  // 自动启动挖掘：仅当从「新建项目」入口进来（URL 带 ?fresh=1）+ 附件上传完毕
+  // 时才自动跑 interview-first；再次打开已有项目（无此标记）不自动启，由用户
+  // 点「▶ 开始挖掘」/「🔄 重新挖掘」手动触发。
+  const isFreshlyCreated = route.query.fresh === '1';
+  if (!resumed && isFreshlyCreated && project.value && project.value.status !== 'completed' && !isReadonly.value) {
     (async () => {
       try { await uploadPromise; } catch (e: any) {
         console.warn('[upload wait]', e?.message || e);
@@ -251,10 +253,10 @@ onMounted(async () => {
       if (!chatRef.value || chat.streaming) return;
       const hasUserMsg = chat.messages.some(m => m.role === 'user');
       const hasAgentMsg = chat.messages.some(m => m.role === 'agent' && (m.content || '').trim());
-      if (hasUserMsg || hasAgentMsg) return;   // 已有挖掘历史：不自动重跑
+      if (hasUserMsg || hasAgentMsg) return;   // 已有挖掘历史不自动重跑
       if (ui.agentMode === 'agent_sdk') {
         chatRef.value.startFirstInterview().catch((e: any) => {
-          console.warn('[auto startInterview on enter] failed:', e?.message || e);
+          console.warn('[auto startInterview on fresh project] failed:', e?.message || e);
         });
       } else {
         const ctx = {
@@ -265,7 +267,7 @@ onMounted(async () => {
           intake: project.value!.intake,
         };
         chatRef.value.autoMine(ctx).catch((e: any) => {
-          console.warn('[auto autoMine on enter] failed:', e?.message || e);
+          console.warn('[auto autoMine on fresh project] failed:', e?.message || e);
         });
       }
     })();
