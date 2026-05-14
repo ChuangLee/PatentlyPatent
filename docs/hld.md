@@ -1,6 +1,6 @@
 # PatentlyPatent 高层设计文档
 
-> 更新于 2026-05-13 · 关联：[prd.md](./prd.md) · [deploy_runbook.md](./deploy_runbook.md) · [user_guide.md](./user_guide.md)
+> 更新于 2026-05-14 · 关联：[prd.md](./prd.md) · [deploy_runbook.md](./deploy_runbook.md) · [user_guide.md](./user_guide.md)
 
 ---
 
@@ -238,6 +238,7 @@ erDiagram
         bool archived
         json intake_json
         json mining_summary_json
+        json plan_snapshot_json "断点续作快照"
         datetime created_at
         datetime updated_at
     }
@@ -250,6 +251,7 @@ erDiagram
         string kind "folder file"
         string source "user ai system kb"
         bool hidden
+        bool readonly
         string mime
         int size
         text content
@@ -275,11 +277,13 @@ erDiagram
         int id PK
         string run_id FK
         int seq
-        string event_type "thinking tool_use tool_result delta done error update_plan"
+        string event_type "thinking tool_use tool_result delta file done error update_plan"
         string tool_use_id "for tool_use tool_result pairing"
         json payload
         datetime ts
     }
+    %% AGENT_EVENT 仅作为 run 运行中的 SSE live-tail 索引；run 终态后行被 dump 到
+    %% .ai-internal/_runs/{run_id}.jsonl FileNode 然后 DELETE，jsonl 是唯一持久档案
 
     AGENT_RUN_LOG {
         int id PK
@@ -302,10 +306,11 @@ erDiagram
 | 表 | 字段 | 用途 |
 | --- | --- | --- |
 | `PROJECT.status` | 8 态枚举 | interview-first 状态机持久化（见 §6） |
+| `PROJECT.plan_snapshot_json` | JSON | 断点续作快照：`{run_id, endpoint, updated_at, history_event_seq, steps[]}`；`steps[i]` 含 id/title/status/started_at/completed_at/artifact_file_ids/artifact_file_paths/artifact_summary；由 `update_plan` 工具调用 + file_id 自动归属维护 |
 | `AGENT_RUN.model` | string | 区分 opus-4-7 主路径与 sonnet-4-6 light 路径 |
 | `AGENT_RUN.cache_*_tokens` | int | prompt cache 实测命中（与 cost 关联分析） |
 | `AGENT_EVENT.tool_use_id` | string | 配对 `tool_use` 与 `tool_result`（前端"工具卡"展开/折叠靠它） |
-| `AGENT_EVENT.seq` | int | run 内严格递增；前端断线重连用 `Last-Event-ID` 续传 |
+| `AGENT_EVENT.seq` | int | run 内严格递增；前端断线重连用 `Last-Event-ID` 续传；run 终态 dump 到 jsonl 后 DELETE 行 |
 
 **核心索引**：
 
@@ -340,6 +345,7 @@ graph TB
     U --> U1[0-报门.md 系统自动落地]
     U --> U2[uploaded.pdf/pptx/docx/xlsx 拖拽]
 
+    A --> A0[项目计划.md update_plan 镜像]
     A --> A1[prior_art.md]
     A --> A2[summary.md]
     A --> A3[embodiments.md]
@@ -353,6 +359,7 @@ graph TB
     S --> S3[3-系统设计文档 HLD.md]
     S --> S4[4-部署运维手册.md]
 
+    I --> I0[_runs/run-id.jsonl 对话档案]
     I --> I1[_compare/full/ mineFull 落地]
     I --> I2[_compare/ A/B 对比]
 ```
@@ -372,6 +379,9 @@ graph TB
 - 前端 FileTree `isReadonlyTree()` 同步守护，UI 弹"只读"提示
 - `system_docs.py` 启动期幂等 `backfill_all_projects()`：4 个白名单 md 自动同步到每个项目根；docs/ 任一文件改了 → 重启 backend 自动推到所有项目
 - `0-报门.md`：create_project 时由 title/description/intake_json 拼成 markdown 自动落「我的资料/」，让员工和 agent 都看得到
+- 「AI 输出/项目计划.md」：每次 `update_plan` 工具调用时由 `mirror_plan_to_markdown(db, pid, snap)` 覆盖式重写；含 step 状态图标 ✅🔄⬜❌ + artifact_summary 小结 + 产出文件路径列表；`file_write_section` 拦截名为「项目计划」「工作计划」的写入，强制走 `update_plan`
+- 「.ai-internal/_runs/{run_id}.jsonl」：run 终态时 `dump_and_purge_events_sync` 把全部 AgentEvent dump 为 jsonl FileNode（hidden+readonly，5MB 上限超出截断+末行说明），成功后 DELETE DB AgentEvent 行；从此 jsonl 是唯一持久档案，DB 表仅作 run 运行期间的 SSE live-tail 索引
+- 文件树实时刷：后端 SSE 翻译层在 `tool_result` text 里 grep `file_id=xxx` + 每次 `update_plan` 后查项目计划.md FileNode → 派生 `file` 事件给前端，前端 `applyAgentEvent` 收到后 `pushNode` 到树并选中；同 run 用 `emitted_file_ids: set` 去重
 
 **虚拟节点（不入库）**：
 
@@ -414,6 +424,7 @@ graph LR
 
 | event | 字段 | 来源 | 前端处理 |
 | --- | --- | --- | --- |
+| `run_started` | `{ run_id }` | 后端 `_interview_sse_response` 首帧 | 缓存 run_id 到 chat.currentRunId，用于断线重连 |
 | `thinking` | `{ text }` | 后端调度推送 | 浅灰斜体行（折叠到调研过程组） |
 | `delta` | `{ text }` | SDK `StreamEvent.content_block_delta.text_delta` | agent 气泡 token 增量 + 检测 `[READY_FOR_WRITE]` / `[READY_FOR_DOCX]` |
 | `tool_use` | `{ id, name, input }` | SDK `AssistantMessage.ToolUseBlock` | 调研过程组内一行工具卡（pending） |
@@ -421,10 +432,11 @@ graph LR
 | `done` | `{ stop_reason, num_turns, total_cost_usd, usage }` | SDK `ResultMessage` | endAgent；stop_reason=`tool_use` 时提示用户继续 |
 | `error` | `{ message }` | try/except | 红色 alert |
 | `update_plan` | `{ name: 'mcp__patent-tools__update_plan', input.steps_json }` | MCP tool 镜像 | 前端 parse steps_json → chat.setPlan() |
+| **`file`** ★ | `{ node }`（FileNode 全字段，camelCase） | **后端派生**：`tool_result` text 含 `file_id=xxx` 或 `update_plan` 触发 镜像项目计划.md | 前端 `pushNode`（同 id 走 Object.assign）+ selectFile + autoOpenSplit |
 | **`step_done`** ★ | `{ content: '✓ <title>' }` | **harness** chat.setPlan diff 检测 | 绿色左边轻量气泡，独立于工具卡组 |
 | **`step_failed`** ★ | `{ content: '✗ <title>' }` | harness 同上 | 红色左边轻量气泡 |
 
-★ harness 派生：前端 `setPlan(newSteps)` 时对比旧 plan，状态变 `completed`/`failed` 自动 push 系统消息 —— **不依赖 LLM 自觉叙述**，工程层保证可见性。
+★ 后端 / harness 派生：`file` 由 SSE 翻译层在拦截到 file_id / update_plan 后查 DB 拼 node payload 发出；`step_done`/`step_failed` 由前端 chat.setPlan diff 检测产生。
 
 ### 4.3 关键约束
 
@@ -433,7 +445,7 @@ graph LR
 | **token 级流** | 必须启用 `include_partial_messages=True`，否则只能拿到段落级 |
 | **tool_use_id 关联** | `tool_use` 与 `tool_result` 配对；前端用 Map<tool_use_id, ToolCard> |
 | **顺序保证** | 同一 run 内 `seq` 严格递增；nginx 不缓冲，应用层用单 asyncio queue |
-| **断线重连** | 客户端 `Last-Event-ID: <seq>`；服务端从 `AGENT_EVENT` 表续推 |
+| **断线重连** | 客户端 `Last-Event-ID: <seq>`；`/runs/{rid}/events?since=N` 通过 `read_run_events_sync`：优先读 jsonl FileNode，DB 兜底；`/stream` 端点 poll DB 直到 run 终态 |
 | **截断** | `tool_result.result` 单帧 ≤ 32KB；超出 → `truncated=true`，原文落盘 .ai-internal/_compare/ |
 
 ---
@@ -530,6 +542,40 @@ sequenceDiagram
 | `UserMessage.content[*].tool_result_block` | `tool_use_id, content, is_error` | `tool_result` |
 | `ResultMessage` | `num_turns, total_cost_usd, stop_reason, usage` | `done` |
 | 异常 / timeout | `str(exc)` | `error` |
+
+### 5.4 断点续作时序（POST `/api/agent/interview/{pid}/resume`）
+
+```mermaid
+sequenceDiagram
+    autonumber
+    participant FE as Vue SPA
+    participant API as routes/agent.py<br/>interview_resume
+    participant SNAP as plan_snapshot
+    participant ARCHIVE as run_archive
+    participant SDK as claude-agent-sdk
+
+    FE->>API: 用户点「📂 续作」
+    API->>SNAP: Project.plan_snapshot_json 读出
+    Note over API: 校验：无 snapshot→409；全 completed→409
+    API->>ARCHIVE: read_run_events_sync(pid, snap.run_id, since=0)
+    Note over ARCHIVE: 优先 .ai-internal/_runs/{rid}.jsonl<br/>缺则 fallback DB AgentEvent
+    ARCHIVE-->>API: history events ≤ history_event_seq
+    API->>API: _condense_events 压缩≤8000 字符<br/>+ summarize_for_resume 拼已完成/待办段
+    API->>API: 新 run_id + AgentRun 行
+    API-->>FE: SSE: run_started {run_id}
+    API->>SDK: query(prompt=resume_head+history+待办)
+    loop SSE 流
+        SDK-->>API: delta/tool_use/tool_result/...
+        API->>SNAP: feed_plan_snapshot (复用已 completed step)
+        API-->>FE: 派生 file 事件 + 透传
+    end
+    SDK-->>API: ResultMessage
+    API-->>FE: SSE: done
+    API->>ARCHIVE: dump_and_purge_events_sync<br/>(jsonl 落盘 + DELETE AgentEvent)
+    API->>SNAP: finalize → Project.plan_snapshot_json 更新
+```
+
+**SYSTEM_PROMPT 续作铁律**：拼 prompt 头时明确「保留所有已 completed step 的 id/title/status 不变，仅推进待办部分」；后端 `apply_update` 也强制保护——已 completed 的 step 在续作 run 内不允许被回退到 in_progress。
 
 ---
 

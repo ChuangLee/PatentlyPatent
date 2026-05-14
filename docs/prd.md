@@ -1,6 +1,6 @@
 # PatentlyPatent 产品需求文档
 
-> 更新于 2026-05-13 · 配套：[`hld.md`](./hld.md) · [`user_guide.md`](./user_guide.md) · [`deploy_runbook.md`](./deploy_runbook.md)
+> 更新于 2026-05-14 · 配套：[`hld.md`](./hld.md) · [`user_guide.md`](./user_guide.md) · [`deploy_runbook.md`](./deploy_runbook.md)
 
 ---
 
@@ -233,49 +233,53 @@ flowchart TB
 | F-01 | **登录** | JWT 真账密 + CAS SSO | ✅ |
 | F-02 | **报门** | 多文件拖拽 + 进度条 + 4 根 folder 自动建 + `0-报门.md` 自动落地 | ✅ |
 | F-03 | **附件等待 + 真文本提取** | PDF/pptx/docx/xlsx/xls/text 全格式（pdfplumber / python-pptx / python-docx / openpyxl / xlrd）；DB 缓存 | ✅ |
-| F-04 | **interview-first 挖掘** | 用户手动点 ▶ 开始挖掘；AI 自评素材足够发 `[READY_FOR_WRITE]` | ✅ |
-| F-05 | **harness 自动汇报** | plan diff in_progress→completed/failed 自动 push 绿/红气泡，不依赖 AI 自觉 | ✅ |
-| F-06 | **mineFull 5 章自动写作** | `[READY_FOR_WRITE]` 触发；5 节并行 SSE | ✅ |
-| F-07 | **重新挖掘救命按钮** | 🔄 cancel run + clear plan + reset chat + 重启 interview | ✅ |
-| F-08 | **docx 导出** | python-docx 5 章交底书模板；`{title}-交底书.docx` | ✅ |
-| F-09 | **4 根文件树** | 我的资料 / AI 输出 / 📖 **本系统文档**（只读）/ 📚 专利知识（只读）/ .ai-internal(hidden) | ✅ |
-| F-10 | **本系统文档自动同步** | 启动期幂等回填 PRD / HLD / 使用说明 / 部署运维手册 到所有项目；用户在文件树随时查 | ✅ |
-| F-11 | **文件预览 Drawer 4 态** | closed / drawer 50% / fullscreen / pinned 480px 固定栏 | ✅ |
-| F-12 | **kb 只读浏览** | 419 文件 / 37 子目录 / 92.7MB | ✅ |
-| F-13 | **资深代理人 persona** | CN+US 双轨执业 10 年；硬性调研门槛 + 5 决策点 + A22/A26/R20.2 法条体检 | ✅ |
-| F-14 | **专利检索 A+B 双路** | A 路智慧芽托管 MCP（logic 2 + main 17 = 19 工具）；B 路 Google Patents BigQuery 降级（免费，CN 全量）；A 路业务错时自动切 B | ✅ |
-| F-15 | **MCP 工具全集** | A+B 19+2 + in-process 智慧芽 in-house 5 + WebSearch/WebFetch + kb 2 + project files 4 + update_plan = 35 工具 | ✅ |
-| F-16 | **真 token 级流** | SDK include_partial_messages=True + tool_use_id 关联 + plan 卡 sticky | ✅ |
-| F-17 | **可折叠"调研过程"分组** | 连续 thinking + tool_call 合并默认折叠，AI 文本独立气泡 | ✅ |
-| F-18 | **markdown + mermaid 渲染** | marked GFM + DOMPurify + 动态 mermaid SVG（chat + 文件预览） | ✅ |
-| F-19 | **SSE 流 + 断线恢复** | detached run；启动期僵死 run 清理；卡死自愈 60s | ✅ |
-| F-20 | **SSE 限流** | Semaphore(5)；超限 503 | ✅ |
-| F-21 | **日预算阻断** | warn $2 / block $10 | ✅ |
-| F-22 | **Dashboard 项目管理** | 卡片 ⋯ 菜单（归档/删除）+ 批量选择删除 | ✅ |
-| F-23 | **admin Dashboard 监控** | agent_runs / cost / fallback / error / 预算 | ✅ |
-| F-24 | **AgentRunLog 全链路** | endpoint / cost / duration / stop_reason / error | ✅ |
+| F-04 | **interview-first 挖掘** | 新建项目附件传完后自动启 interview（仅新建入口 `?fresh=1`）；已有项目重进不自动启；AI 自评素材足够发 `[READY_FOR_WRITE]` | ✅ |
+| F-05 | **项目计划 = agent 工作表** | 「AI 输出/项目计划.md」由 `update_plan` 工具镜像；含 step 状态图标 / 产出文件链接 / 小结；是 agent 自己的工作台账兼员工进度面板；入口（声明 plan）→ 过程（每步更新 + 必填小结）→ 收口（最终决策动作）；agent 不可直接 file_write_section 写这个文件 | ✅ |
+| F-06 | **断点续作** | 工作台顶部检测未完成 plan → 显示「上次进度 N/M · 当前：xx · 📂 续作 / 🔄 重新挖掘」；点续作走 `POST /api/agent/interview/{pid}/resume`，后端用历史 jsonl 压缩 ≤8000 字符拼到 prompt 头，agent 从下一个未完成 step 接着干，不重做已完成步骤 | ✅ |
+| F-07 | **harness 自动汇报** | plan diff in_progress→completed/failed 自动 push 绿/红气泡，不依赖 AI 自觉 | ✅ |
+| F-08 | **mineFull 5 章自动写作** | `[READY_FOR_WRITE]` 触发；5 节并行 SSE | ✅ |
+| F-09 | **重新挖掘救命按钮** | 🔄 cancel run + clear plan + reset chat + 重启 interview | ✅ |
+| F-10 | **docx 导出** | python-docx 5 章交底书模板；`{title}-交底书.docx` | ✅ |
+| F-11 | **4 根文件树** | 我的资料 / AI 输出 / 📖 **本系统文档**（只读）/ 📚 专利知识（只读）/ .ai-internal(hidden，含 _runs/ 对话档案 + _compare/ A/B 落盘) | ✅ |
+| F-12 | **本系统文档自动同步** | 启动期幂等回填 PRD / HLD / 使用说明 / 部署运维手册 到所有项目；content 变了 update FileNode | ✅ |
+| F-13 | **文件树实时刷** | agent 写文件后后端在 SSE 派生 `file` 事件（解析 tool_result 里的 `file_id=` + 每次 update_plan 后镜像 项目计划.md）→ 前端立刻 pushNode；「刷新」按钮真去服务端拉；服务端 fileTree 始终覆盖 sessionStorage 缓存 | ✅ |
+| F-14 | **对话档案落盘** | run 终态时把全部 AgentEvent dump 成 `.ai-internal/_runs/{run_id}.jsonl`（hidden+readonly，5MB 单文件上限）；成功后 DELETE DB AgentEvent；jsonl 是唯一持久档案，DB 表只在 run 运行期间做 SSE live-tail 索引 | ✅ |
+| F-15 | **文件预览 Drawer 4 态** | closed / drawer 50% / fullscreen / pinned 480px 固定栏 | ✅ |
+| F-16 | **kb 只读浏览** | 419 文件 / 37 子目录 / 92.7MB | ✅ |
+| F-17 | **资深代理人 persona** | CN+US 双轨执业 10 年；硬性调研门槛 + 5 决策点 + A22/A26/R20.2 法条体检 | ✅ |
+| F-18 | **专利检索 A+B 双路** | A 路智慧芽托管 MCP（logic 2 + main 17 = 19 工具）；B 路 Google Patents BigQuery 降级（免费，CN 全量）；A 路业务错时自动切 B | ✅ |
+| F-19 | **MCP 工具全集** | A+B 19+2 + in-process 智慧芽 in-house 5 + WebSearch/WebFetch + kb 2 + project files 4 + update_plan = 35 工具 | ✅ |
+| F-20 | **真 token 级流** | SDK include_partial_messages=True + tool_use_id 关联 + plan 卡 sticky | ✅ |
+| F-21 | **可折叠"调研过程"分组** | 连续 thinking + tool_call 合并默认折叠，AI 文本独立气泡 | ✅ |
+| F-22 | **markdown + mermaid 渲染** | marked GFM + DOMPurify + 动态 mermaid SVG（chat + 文件预览） | ✅ |
+| F-23 | **SSE 流 + 断线恢复** | detached run；启动期僵死 run 清理；卡死自愈 60s；重连按 `Last-Event-ID` 走 read_run_events（先 jsonl 后 DB） | ✅ |
+| F-24 | **SSE 限流** | Semaphore(5)；超限 503 | ✅ |
+| F-25 | **日预算阻断** | warn $2 / block $10 | ✅ |
+| F-26 | **Dashboard 项目管理** | 卡片 ⋯ 菜单（归档/删除）+ 批量选择删除 | ✅ |
+| F-27 | **admin Dashboard 监控** | agent_runs / cost / fallback / error / 预算 | ✅ |
+| F-28 | **AgentRunLog 全链路** | endpoint / cost / duration / stop_reason / error | ✅ |
 
 ### 5.2 P1 — 下一季度计划
 
 | # | 模块 | 子能力 | 优先级 |
 | --- | --- | --- | --- |
-| F-30 | **检索阶段精检** | interview 和 mineFull 之间加「精检」基于已挖掘关键词 + IPC + 申请人组合查重 | 高 |
-| F-31 | **撰写阶段多轮迭代修订** | 写完一章后允许说「这段太长 / 用另一种实施例」局部重写 | 高 |
-| F-32 | **kb_admin 角色 + kb 写权限** | RBAC 增加 kb_admin；kb 节点开放上传/编辑 | 中 |
-| F-33 | **专利性初判报告** | 检索后自动生成「新颖性 / 创造性」初判，标 X/Y/N 文献 | 中 |
-| F-34 | **Sentry + cron 备份** | 错误监控 + sqlite 每日备份 | 中 |
-| F-35 | **真用户库 + CAS 联调** | 取代 u1/u2 fixture；员工首次 SSO 自动建 user 行 | 中 |
-| F-36 | **a11y + 移动端 375/768** | Lighthouse a11y > 90 | 低 |
+| F-40 | **检索阶段精检** | interview 和 mineFull 之间加「精检」基于已挖掘关键词 + IPC + 申请人组合查重 | 高 |
+| F-41 | **撰写阶段多轮迭代修订** | 写完一章后允许说「这段太长 / 用另一种实施例」局部重写 | 高 |
+| F-42 | **kb_admin 角色 + kb 写权限** | RBAC 增加 kb_admin；kb 节点开放上传/编辑 | 中 |
+| F-43 | **专利性初判报告** | 检索后自动生成「新颖性 / 创造性」初判，标 X/Y/N 文献 | 中 |
+| F-44 | **Sentry + cron 备份** | 错误监控 + sqlite 每日备份 | 中 |
+| F-45 | **真用户库 + CAS 联调** | 取代 u1/u2 fixture；员工首次 SSO 自动建 user 行 | 中 |
+| F-46 | **a11y + 移动端 375/768** | Lighthouse a11y > 90 | 低 |
 
 ### 5.3 P2 — 远景视野
 
 | # | 模块 | 子能力 | 说明 |
 | --- | --- | --- | --- |
-| F-26 | **多语言**（EN 交底书） | US persona 已就位；US 专代要 EN 版 disclosure | 双语模板切换 |
-| F-27 | **多 agent 协作** | 检索 agent + 撰写 agent + 审查 agent 三角；employee 看到合议过程 | 类似 AutoGen / CrewAI 风格 |
-| F-28 | **团队共享** | 同部门员工可只读他人项目；leader 可批量看本组挖掘进展 | RBAC + 部门字段 |
-| F-29 | **OA 答复辅助** | 上传审查意见 → AI 出答辩思路 + 修改建议 | 与原 disclosure 联动 |
-| F-30 | **专代审核闭环** | kb_admin 在 docx 上批注 → 回到 web UI → 员工逐条改 | 二审闭环 |
+| F-60 | **多语言**（EN 交底书） | US persona 已就位；US 专代要 EN 版 disclosure | 双语模板切换 |
+| F-61 | **多 agent 协作** | 检索 agent + 撰写 agent + 审查 agent 三角；employee 看到合议过程 | 类似 AutoGen / CrewAI 风格 |
+| F-62 | **团队共享** | 同部门员工可只读他人项目；leader 可批量看本组挖掘进展 | RBAC + 部门字段 |
+| F-63 | **OA 答复辅助** | 上传审查意见 → AI 出答辩思路 + 修改建议 | 与原 disclosure 联动 |
+| F-64 | **专代审核闭环** | kb_admin 在 docx 上批注 → 回到 web UI → 员工逐条改 | 二审闭环 |
 
 ---
 
@@ -290,6 +294,8 @@ flowchart TB
 | `[READY_FOR_WRITE]` | AI 自评：interview 已收集足够素材，可以开始写 5 章 | 前端检测信号 → 自动调 `/api/agent/runs/start` 启 mineFull |
 | `[READY_FOR_DOCX]` | AI 自评：5 章已写完 + 收尾确认完成，可以导出 | 前端 🎯 docx 按钮呼吸高亮 + 颜色 primary |
 | **`step_done` / `step_failed`**（harness 层） | plan diff：某 step 从 in_progress 变 completed/failed | 前端自动 push 一行绿/红轻量气泡（不依赖 AI 自觉叙述） |
+| **`update_plan`** 工具调用 | plan 状态变更 | 后端 PlanSnapshotState 累计 step + buffer artifact_file_ids；run 终态前持续 flush 到 `Project.plan_snapshot_json` + 镜像 `AI 输出/项目计划.md` |
+| **`tool_result` 含 `file_id=`** | 工具产出新文件 | 后端 SSE 翻译层派生 `file` 事件给前端 + 把 file_id 自动归属到当前 in_progress step.artifact_file_ids |
 
 ### 6.2 状态机图
 
