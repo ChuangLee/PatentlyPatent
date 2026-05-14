@@ -235,7 +235,7 @@ flowchart TB
 | F-03 | **附件等待 + 真文本提取** | PDF/pptx/docx/xlsx/xls/text 全格式（pdfplumber / python-pptx / python-docx / openpyxl / xlrd）；DB 缓存 | ✅ |
 | F-04 | **interview-first 挖掘** | 新建项目附件传完后自动启 interview（仅新建入口 `?fresh=1`）；已有项目重进不自动启；AI 自评素材足够发 `[READY_FOR_WRITE]` | ✅ |
 | F-05 | **项目计划 = agent 工作表** | 「AI 输出/项目计划.md」由 `update_plan` 工具镜像；含 step 状态图标 / 产出文件链接 / 小结；是 agent 自己的工作台账兼员工进度面板；入口（声明 plan）→ 过程（每步更新 + 必填小结）→ 收口（最终决策动作）；agent 不可直接 file_write_section 写这个文件 | ✅ |
-| F-06 | **断点续作** | 工作台顶部检测未完成 plan → 显示「上次进度 N/M · 当前：xx · 📂 续作 / 🔄 重新挖掘」；点续作走 `POST /api/agent/interview/{pid}/resume`，后端用历史 jsonl 压缩 ≤8000 字符拼到 prompt 头，agent 从下一个未完成 step 接着干，不重做已完成步骤 | ✅ |
+| F-06 | **对话原生续作（无续作按钮）** | 顶部 hint 展示「上次进度 N/M · 当前：xx」；员工回项目直接在输入框对话即可，SYSTEM_PROMPT 铁律：每轮开工前先 `read_user_file('项目计划.md')` 拿上次进度。这样比专门"续作按钮"自然 —— 不会出现 AI 已经问了用户、用户已回答、点按钮反而丢失回答的情况 | ✅ |
 | F-07 | **harness 自动汇报** | plan diff in_progress→completed/failed 自动 push 绿/红气泡，不依赖 AI 自觉 | ✅ |
 | F-08 | **mineFull 5 章自动写作** | `[READY_FOR_WRITE]` 触发；5 节并行 SSE | ✅ |
 | F-09 | **重新挖掘救命按钮** | 🔄 cancel run + clear plan + reset chat + 重启 interview | ✅ |

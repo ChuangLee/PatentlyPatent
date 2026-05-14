@@ -543,39 +543,51 @@ sequenceDiagram
 | `ResultMessage` | `num_turns, total_cost_usd, stop_reason, usage` | `done` |
 | 异常 / timeout | `str(exc)` | `error` |
 
-### 5.4 断点续作时序（POST `/api/agent/interview/{pid}/resume`）
+### 5.4 对话原生续作（无续作按钮）
+
+**设计取舍**：早期版本有「📂 续作」按钮 + `/resume` 端点，但有一个 case 处理不优雅 ——
+上次中断时如果 AI 正在等用户回答，用户点续作 = 后端塞 "从待办区第一个未完成 step 续作"
+到 prompt 头，AI 收不到用户的回答 → 重新追问 / 瞎续。
+
+现在采用**对话原生方案**：用户回项目直接在对话框输入消息（哪怕只是"继续"或对上次提问的回答），
+走正常 `interview_stream`；SYSTEM_PROMPT 铁律要求 agent 每轮开工先读项目计划.md。
 
 ```mermaid
 sequenceDiagram
     autonumber
     participant FE as Vue SPA
-    participant API as routes/agent.py<br/>interview_resume
-    participant SNAP as plan_snapshot
-    participant ARCHIVE as run_archive
+    participant API as routes/agent.py<br/>interview
     participant SDK as claude-agent-sdk
+    participant TOOL as read_user_file
+    participant PLAN as plan_snapshot
 
-    FE->>API: 用户点「📂 续作」
-    API->>SNAP: Project.plan_snapshot_json 读出
-    Note over API: 校验：无 snapshot→409；全 completed→409
-    API->>ARCHIVE: read_run_events_sync(pid, snap.run_id, since=0)
-    Note over ARCHIVE: 优先 .ai-internal/_runs/{rid}.jsonl<br/>缺则 fallback DB AgentEvent
-    ARCHIVE-->>API: history events ≤ history_event_seq
-    API->>API: _condense_events 压缩≤8000 字符<br/>+ summarize_for_resume 拼已完成/待办段
+    FE->>API: 用户在对话框输入文本发送<br/>POST /api/agent/interview/{pid}<br/>{user_msg, history}
     API->>API: 新 run_id + AgentRun 行
     API-->>FE: SSE: run_started {run_id}
-    API->>SDK: query(prompt=resume_head+history+待办)
+    API->>SDK: query(prompt: history + user_msg + SYSTEM_PROMPT)
+    SDK->>TOOL: read_user_file(name='项目计划.md')
+    TOOL-->>SDK: 上次工作记录（已完成 step + artifact_summary）
+    SDK->>SDK: 消化用户答案 + 续推 update_plan<br/>保留 completed 状态不变，推进下一步
     loop SSE 流
         SDK-->>API: delta/tool_use/tool_result/...
-        API->>SNAP: feed_plan_snapshot (复用已 completed step)
+        API->>PLAN: feed_plan_snapshot 维护增量
         API-->>FE: 派生 file 事件 + 透传
     end
     SDK-->>API: ResultMessage
+    API->>API: dump_and_purge_events_sync<br/>(jsonl 落盘 + DELETE AgentEvent)
+    API->>PLAN: finalize → Project.plan_snapshot_json 更新
     API-->>FE: SSE: done
-    API->>ARCHIVE: dump_and_purge_events_sync<br/>(jsonl 落盘 + DELETE AgentEvent)
-    API->>SNAP: finalize → Project.plan_snapshot_json 更新
 ```
 
-**SYSTEM_PROMPT 续作铁律**：拼 prompt 头时明确「保留所有已 completed step 的 id/title/status 不变，仅推进待办部分」；后端 `apply_update` 也强制保护——已 completed 的 step 在续作 run 内不允许被回退到 in_progress。
+**SYSTEM_PROMPT 续作铁律**：
+- 每轮开工**铁律**先 `read_user_file(project_id, name='项目计划.md')` 看上次工作记录
+- 文件空 / 不存在 → 新项目，调 `update_plan` 声明 plan 开工
+- 文件有内容 → 续作场景，保留 completed/failed step 的状态和小结不变，从第一个非 completed step 接着推
+- 如果上次 in_progress step 是「问申请人 X」这种等待回答的动作，对话历史里申请人已经回答了 → 直接消化回答 + `update_plan` 标 completed + 写 artifact_summary 记录关键事实 + 推进下一步
+
+**前端 hint**：工作台顶部仍展示「上次进度 N/M · 当前：xx」，但只是**状态可视化**，不绑按钮。
+
+**遗留 API**：`POST /api/agent/interview/{pid}/resume` 后端端点保留作 admin 兜底入口，UI 不再触发。
 
 ---
 

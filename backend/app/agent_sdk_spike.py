@@ -301,11 +301,12 @@ def _build_mcp_server():
     @tool(
         "read_user_file",
         (
-            "读用户上传的文件正文（「我的资料/」下）。"
+            "按文件名读项目中任意文件的正文。常用于读「我的资料/」下用户上传的资料、"
+            "或读「AI 输出/项目计划.md」拿上次工作进度。"
             "支持格式：PDF / Word .docx / PowerPoint .pptx / Excel .xlsx/.xls / "
             "Markdown / 纯文本 / JSON / CSV。"
             "（.doc/.ppt 老二进制格式暂不支持，需另存为新格式）。"
-            "name 是文件名（如 'AI和身份认证.pptx'）。返回 content 文本（最多 30000 字）。"
+            "name 是文件名（如 'AI和身份认证.pptx' 或 '项目计划.md'）。返回 content 文本（最多 30000 字）。"
         ),
         {"project_id": str, "name": str},
     )

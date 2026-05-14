@@ -47,46 +47,28 @@ const hasMiningHistory = computed(() =>
   }),
 );
 
-/** 断点续作：有 plan_snapshot 且仍有未完成 step（既不是 completed 也不是 failed） */
+/** plan_snapshot：仅用于顶部「上次进度 N/M · 当前 xx」状态展示，不再做"续作"按钮 */
 const planSnapshot = computed(() => project.value?.planSnapshot || null);
-const resumableSteps = computed(() => {
+const planProgress = computed(() => {
   const snap = planSnapshot.value;
-  if (!snap || !Array.isArray(snap.steps)) return null;
+  if (!snap || !Array.isArray(snap.steps) || snap.steps.length === 0) return null;
   const total = snap.steps.length;
   const completed = snap.steps.filter(s => s.status === 'completed').length;
   const failed = snap.steps.filter(s => s.status === 'failed').length;
   const incomplete = total - completed - failed;
-  if (incomplete <= 0) return null;
   const cur = snap.steps.find(s => s.status === 'in_progress')
             || snap.steps.find(s => s.status !== 'completed' && s.status !== 'failed');
-  return { total, completed, incomplete, currentTitle: cur?.title || '' };
+  return {
+    total, completed, incomplete, failed,
+    currentTitle: cur?.title || '',
+    allDone: incomplete <= 0,
+  };
 });
-const resuming = ref(false);
 
 /** v0.37: 用户手动点"开始挖掘"才启动 interview（不再 onMounted 自动跑） */
 async function startMining() {
   if (!chatRef.value || chat.streaming) return;
   await chatRef.value.startFirstInterview();
-}
-
-/** 断点续作：从上次 plan_snapshot 续 */
-async function resumeFromSnapshot() {
-  if (!chatRef.value || chat.streaming || resuming.value) return;
-  resuming.value = true;
-  try {
-    await chatRef.value.resumeFromSnapshot();
-    // 续作完后刷新项目以拿到最新 planSnapshot
-    if (project.value) {
-      try {
-        const fresh = await projectsApi.get(project.value.id);
-        project.value = fresh;
-      } catch { /* ignore */ }
-    }
-  } catch (e: any) {
-    message.error('续作失败：' + (e?.message || e));
-  } finally {
-    resuming.value = false;
-  }
 }
 
 /** v0.37: 强制重置当前项目状态 → 重新启动 interview-first（卡住时救命按钮） */
@@ -331,26 +313,27 @@ function onRoundComplete() {
   <!-- v0.37: 紧凑标题栏（1 行 36px 高） -->
   <div class="pp-wb-bar">
     <span class="pp-wb-title" :title="project?.title">{{ project?.title ?? '加载中...' }}</span>
-    <span v-if="resumableSteps && !isReadonly" class="pp-wb-resume-hint">
-      上次进度 {{ resumableSteps.completed }}/{{ resumableSteps.total }}
-      <span v-if="resumableSteps.currentTitle" class="pp-wb-resume-step">
-        · 当前：{{ resumableSteps.currentTitle }}
-      </span>
+    <span v-if="planProgress && !isReadonly" class="pp-wb-resume-hint"
+          :title="'AI 在「AI 输出/项目计划.md」里维护工作表，回到项目直接对话即可让它续上'">
+      <template v-if="planProgress.allDone">
+        ✓ 上次计划已完成 {{ planProgress.completed }}/{{ planProgress.total }}
+      </template>
+      <template v-else>
+        上次进度 {{ planProgress.completed }}/{{ planProgress.total }}
+        <span v-if="planProgress.currentTitle" class="pp-wb-resume-step">
+          · 当前：{{ planProgress.currentTitle }}
+        </span>
+      </template>
     </span>
     <span class="pp-wb-actions">
-      <!-- 断点续作：有未完成 plan 时优先展示 -->
-      <a-button v-if="!isReadonly && resumableSteps && ui.agentMode === 'agent_sdk' && !chat.streaming"
-                size="small" type="primary"
-                :loading="resuming"
-                @click="resumeFromSnapshot">📂 续作</a-button>
-      <!-- 没挖掘历史 且 无可续作 plan：显示"开始挖掘" -->
-      <a-button v-if="!isReadonly && project && ui.agentMode === 'agent_sdk' && !hasMiningHistory && !resumableSteps"
+      <!-- 全新项目（无 plan 也无聊天历史）：显示「开始挖掘」 -->
+      <a-button v-if="!isReadonly && project && ui.agentMode === 'agent_sdk' && !hasMiningHistory && !planSnapshot"
                 size="small" type="primary"
                 :loading="fullMining || restartMining"
                 :disabled="chat.streaming"
                 @click="startMining">▶ 开始挖掘</a-button>
-      <!-- 已有历史：始终保留"重新挖掘"次按钮 -->
-      <a-button v-if="!isReadonly && project && ui.agentMode === 'agent_sdk' && (hasMiningHistory || resumableSteps)"
+      <!-- 已有历史 / plan：始终保留「重新挖掘」推翻入口 -->
+      <a-button v-if="!isReadonly && project && ui.agentMode === 'agent_sdk' && (hasMiningHistory || planSnapshot)"
                 size="small" :loading="restartMining"
                 @click="restartFromScratch">🔄 重新挖掘</a-button>
     </span>
