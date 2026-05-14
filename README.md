@@ -1,91 +1,100 @@
 # PatentlyPatent
 
-> **企业自助专利挖掘系统** · 员工 + Agent 协作 · 把工作中的创新变成可申请的专利
+> **企业自助 AI 专利挖掘工作台** · 资深代理人级 AI 对话 + 检索 + 撰写 · 把一个含糊的发明点变成可交付代理所的中文交底书初稿
 
-![status](https://img.shields.io/badge/status-WIP-orange)
+![python](https://img.shields.io/badge/python-3.12%2B-blue)
+![frontend](https://img.shields.io/badge/frontend-Vue3%20%2B%20AntDV-4FC08D)
+![llm](https://img.shields.io/badge/LLM-Claude%20Opus%204.7-6e3df7)
 ![license](https://img.shields.io/badge/license-Apache--2.0-blue)
-![python](https://img.shields.io/badge/python-3.10%2B-blue)
 
-## ⚠️ 当前状态
+公网入口：<https://blind.pub/patent>
 
-**Work in progress · 不可用于生产**。本仓库正在从 v1（CNIPA 优先的专利全流程辅助 CLI）转向 v2（企业自助挖掘 Web 系统）。v1 代码（`pk/` 包）保留作为参考，v2 设计文档优先（`docs/requirements_v2.md`）。
+## 它做什么
 
-## 目标
+一名研发员工，用 1 小时左右：
 
-为企业员工提供"工作中发现创新 → 自助挖掘 → 出交底书"的浏览器自助平台：
+1. **报门**：一段技术描述 + 可选 PDF/PPT/Word 附件
+2. **附件归档完成后自动启动 interview-first 挖掘**：AI 边读资料边调研，问员工 ≤3 个关键事实/数据
+3. **AI 自评素材足够** → 发 `[READY_FOR_WRITE]` 信号 → 自动并行写 5 章交底书初稿
+4. **收尾确认 + 导出 docx**：员工拿到 `{发明名}-交底书.docx` 发给代理所
 
-1. 员工一句话描述工作创新
-2. Agent 引导问询，把含糊的发现拆成结构化创新点
-3. 调用专利数据源做现有技术筛查 + 初步专利性判断
-4. 生成符合 CN 实务的中文交底书草稿，员工编辑后提交 IP 部门
+中间 AI 全程被注入「CN+US 双轨执业 10 年代理人」persona，硬性调研门槛 + 5 决策点 + A22/A26/R20.2 法条体检。
 
-## 设计理念
-
-- **法条嵌入式 lint**：A22.3 三步法 / A26.3 充分公开 / A26.4 支持 / A33 修改超范围 / R20.2 必要技术特征 — 每个写入流程的关键节点
-- **可锚定可追溯**：claim 中每个特征必须能锚回说明书原文与原始申请，可机械校验
-- **专家心智显式化**：把"上位词的胆量""D1 重定义""R20.2 最小集"等代理师 know-how 显式编码为 prompt + 规则
-- **可插拔数据源**：智慧芽 / Google Patents BigQuery / CNIPA / EPO OPS / USPTO ODP — adapter 接口统一
-
-## 技术栈（v2 计划）
+## 技术栈
 
 | 层 | 选型 |
-|---|---|
-| 前端 | Vue 3 + Ant Design Vue（Vue Vben Admin v5） |
-| 后端 | FastAPI Best Architecture (FBA) v1.13+ |
-| Agent | LangGraph + Anthropic SDK |
-| 流式 | sse-starlette + @ai-sdk/vue |
-| 编辑器 | Tiptap |
-| 文档 | docxtpl + Pandoc |
-| 存储 | PostgreSQL + Redis + MinIO + Meilisearch |
-| 部署 | Docker Compose + Nginx |
+| --- | --- |
+| 前端 | Vue 3 + Ant Design Vue + Pinia + Vite |
+| 后端 | FastAPI + SQLAlchemy 2.0 + SQLite WAL |
+| Agent | `claude-agent-sdk` + bundled Claude CLI（OAuth，不依赖 `ANTHROPIC_API_KEY`） |
+| 主模型 | Claude Opus 4.7（撰写）+ Sonnet 4.6（light） |
+| 流式 | Server-Sent Events，token 级 + tool_use_id 关联 + detached run 断线重连 |
+| 编辑/预览 | Tiptap + marked GFM + mermaid + mammoth (docx) |
+| 文档输出 | python-docx，5 章通用交底书结构 |
+| 专利检索 | A 路 智慧芽托管 MCP（19 工具）+ B 路 Google Patents BigQuery（免费降级备选） |
+| 鉴权 | JWT HS256 / 企业 CAS / bcrypt 真账密 |
+| 部署 | systemd + nginx + Linux |
 
-详见 `ai_docs/oss_selection.md`。
+## A+B 双路专利检索
+
+- **A 路（首选，收费）**：智慧芽托管 MCP — `patsnap_search` 关键词/语义检索、`patsnap_fetch` 拉权要/法律/同族、分类号助手、同义词扩展、申请人/语义/图像/嵌套相似检索等 19 个工具
+- **B 路（降级备选，免费）**：Google Patents BigQuery `patents-public-data` — `bq_search_patents` / `bq_patent_detail`，CN 全量含中文译本
+- A 路业务错（`67200004/05`）时 agent 自动切 B 路，SYSTEM_PROMPT 显式约束不重试
 
 ## 项目结构
 
 ```
 .
-├── pk/                  # v1 Python 包（CNIPA 全流程 CLI 原型）
-├── tests/               # v1 单元测试
-├── docs/                # 需求 / 架构 / ADR
-│   ├── requirements.md
-│   ├── architecture.md
-│   └── requirements_v2.md
-├── ai_docs/             # 调研报告（LLM 工具/数据源/CN 实务/Skills/智慧芽 API/OSS 选型）
-├── examples/            # 演示交底书样例
-├── skills/              # Claude Skill 薄包装（v1）
-└── refs/                # （不入仓）参考资料：3rd_repos + 专利专家知识库
+├── frontend/                    # Vue3 SPA
+├── backend/                     # FastAPI + Agent
+│   ├── app/
+│   │   ├── agent_interview.py   # interview-first 状态机
+│   │   ├── agent_sdk_spike.py   # SDK 适配 + in-process MCP server
+│   │   ├── agent_section_demo.py # 5 节 section prompts
+│   │   ├── patents_bq.py        # B 路 BigQuery adapter
+│   │   ├── zhihuiya.py          # in-house 智慧芽 REST 兜底
+│   │   ├── disclosure_no34.py   # docx 模板
+│   │   ├── routes/              # 11 个 FastAPI router
+│   │   └── ...
+│   ├── storage/                 # 项目附件 + 导出 docx
+│   └── patentlypatent.db        # SQLite WAL
+├── docs/                        # 4 篇正式文档（README 串目录）
+│   ├── prd.md
+│   ├── hld.md
+│   ├── user_guide.md
+│   └── deploy_runbook.md
+├── refs/                        # （不入 git）参考资料
+│   └── 专利专家知识库/           # 419 篇 CN 实务知识库（kb）
+├── ai_docs/                     # 调研稿
+└── .secrets/                    # （不入 git）凭证
+    ├── zhihuiya.env             # REST token + 托管 MCP URLs
+    └── gcp-bq.json              # B 路 BigQuery service account
 ```
-
-## v1 快速试用（CLI，非生产）
-
-```bash
-pip install -e .
-export ANTHROPIC_API_KEY=...
-pk search --input examples/demo_invention.md -o search.json
-pk draft  --input examples/demo_invention.md -s search.json -o draft.md
-pk check  --input draft.md -o check_report.md
-```
-
-无 API key 也能演示：`PK_OFFLINE_DEMO=1 pk draft -i examples/demo_invention.md`。
-
-## v2 路线（开发中）
-
-- M1：智慧芽 adapter（官网 cookie + playwright）+ 数据模型 + 报门→检索单元跑通
-- M2：FastAPI 后端骨架 + 认证 + 项目 CRUD + 流式 mining
-- M3：完整 4 阶段 + 极简前端 + 端到端 demo
-- M4：reviewer 审阅 + 导出 docx + 配额/审计
 
 ## 文档导航
 
-- [v2 产品需求 (docs/requirements_v2.md)](./docs/requirements_v2.md)
-- [OSS 选型决策 (ai_docs/oss_selection.md)](./ai_docs/oss_selection.md)
-- [智慧芽 API 实测 (ai_docs/zhihuiya_api.md)](./ai_docs/zhihuiya_api.md)
-- [CN 实务调研 (ai_docs/research_03_cn_practice.md)](./ai_docs/research_03_cn_practice.md)
+- [docs/README.md](./docs/README.md) — 文档总览
+- [docs/user_guide.md](./docs/user_guide.md) — 员工用户手册（5 步出交底书）
+- [docs/prd.md](./docs/prd.md) — 产品需求文档（做什么 / 给谁 / 衡量什么 / 路线图）
+- [docs/hld.md](./docs/hld.md) — 高层设计（C4 三层 / 数据模型 / SSE 协议 / MCP 拓扑 / 安全 / 可观测）
+- [docs/deploy_runbook.md](./docs/deploy_runbook.md) — 部署运维手册（systemd / nginx / CLI 认证 / BigQuery 启用 / CAS / 紧急处理）
+
+## 设计理念
+
+- **interview-first** 而非 generate-first：先问清楚到 AI 自评素材足够，再开写
+- **信号驱动状态机**：流程跃迁靠 AI 在文本里显式输出 `[READY_FOR_WRITE]` 等信号，不靠字数/章数等 heuristic
+- **企业可控**：所有 LLM 走 claude CLI OAuth；员工资料不出企业内网
+- **可观测 + 可治理**：每次 agent 调用入 `AgentRunLog`；admin Dashboard 看 cost / fallback / error；日预算阻断（warn $2 / block $10）
+- **harness 层兜底**：plan diff 自动派生 `step_done` / `step_failed` 气泡，不依赖 LLM 自觉叙述
+- **断线必可恢复**：detached SSE run + event_id 增量重放
+
+## 文档自同步
+
+启动期 `system_docs.backfill_all_projects()` 把上述 4 篇正式文档幂等推到每个项目的「📖 本系统文档」只读根目录，员工在工作台文件树即可查 PRD / HLD / 使用手册 / 部署手册。
 
 ## 贡献
 
-WIP 阶段不接受 PR。设计稳定后会在 README 增加贡献指引。
+企业内部部署阶段，暂不接受外部 PR。
 
 ## 许可
 
