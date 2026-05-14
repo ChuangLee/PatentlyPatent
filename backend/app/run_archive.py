@@ -1,6 +1,10 @@
 """run 结束时把 AgentEvent dump 成 jsonl，落到 .ai-internal/_runs/<run_id>.jsonl。
+dump 成功后 DELETE FROM agent_events WHERE run_id=? —— jsonl 成为唯一持久档案，
+DB 表只在 run 运行期间作为 SSE live-tail 的索引缓冲，run 终态后清空。
 
-同时提供 feed_plan_snapshot(snap, ev, seq) helper，把单条 SSE 事件喂给 PlanSnapshotState。
+同时提供：
+  - feed_plan_snapshot(snap, ev, seq)：单条 SSE 事件喂给 PlanSnapshotState
+  - read_run_events(project_id, run_id)：先读 jsonl 文件，缺则 fallback 读 AgentEvent 表
 
 可见性：
   - hidden=True + readonly=True
@@ -114,6 +118,100 @@ def _ensure_internal_runs_folder(db: Session, project_id: str) -> Optional[str]:
 
 
 _MAX_JSONL_CHARS = 5 * 1024 * 1024   # 5 MB 单文件上限；超出截断 + 末行说明
+
+
+def read_run_events_sync(
+    project_id: Optional[str],
+    run_id: str,
+    *,
+    since: int = 0,
+) -> list[dict]:
+    """读某 run 的全部 events。先看 jsonl FileNode，缺则 fallback 读 AgentEvent 表（run 还在跑没 dump 时）。
+
+    返回 [{seq, type, payload(dict, 不含 seq/ts 的扁平视图就是原 ev dict)}]。
+    """
+    if not project_id or not run_id:
+        return []
+    from .db import SessionLocal
+
+    db = SessionLocal()
+    try:
+        # 1) 优先读 jsonl 文件（run 已终态时存在；权威档案）
+        runs_folder_id = _ensure_internal_runs_folder(db, project_id)
+        if runs_folder_id:
+            node = (
+                db.query(FileNode)
+                .filter(
+                    FileNode.project_id == project_id,
+                    FileNode.parent_id == runs_folder_id,
+                    FileNode.name == f"{run_id}.jsonl",
+                )
+                .first()
+            )
+            if node and node.content:
+                rows: list[dict] = []
+                for line in node.content.split("\n"):
+                    line = line.strip()
+                    if not line:
+                        continue
+                    try:
+                        rec = json.loads(line)
+                    except Exception:
+                        continue
+                    seq = int(rec.get("seq") or 0)
+                    if seq <= since:
+                        continue
+                    rows.append({"seq": seq, "type": rec.get("type"), "payload": rec})
+                if rows:
+                    return rows
+
+        # 2) Fallback：读 DB AgentEvent（run 还在跑、没 dump 时）
+        events = (
+            db.query(AgentEvent)
+            .filter(AgentEvent.run_id == run_id, AgentEvent.seq > since)
+            .order_by(AgentEvent.seq.asc())
+            .all()
+        )
+        return [
+            {"seq": e.seq, "type": e.type, "payload": dict(e.payload or {})}
+            for e in events
+        ]
+    finally:
+        db.close()
+
+
+def _delete_events_sync(run_id: str) -> int:
+    """run 终态 dump 成功后清掉 DB AgentEvent 行。返回删除行数。"""
+    from .db import SessionLocal
+    from sqlalchemy import text as _text
+
+    db = SessionLocal()
+    try:
+        res = db.execute(
+            _text("DELETE FROM agent_events WHERE run_id = :rid"),
+            {"rid": run_id},
+        )
+        db.commit()
+        return res.rowcount or 0
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("delete agent_events failed run=%s: %s", run_id, exc)
+        try:
+            db.rollback()
+        except Exception:
+            pass
+        return 0
+    finally:
+        db.close()
+
+
+def dump_and_purge_events_sync(run_id: str, project_id: Optional[str]) -> Optional[str]:
+    """run 终态时调用：先 dump_run_to_filenode_sync 落 jsonl，**dump 成功后**才清 AgentEvent。"""
+    fid = dump_run_to_filenode_sync(run_id, project_id)
+    if fid:
+        n = _delete_events_sync(run_id)
+        if n:
+            logger.info("dump_and_purge: run=%s jsonl_file=%s purged_events=%s", run_id, fid, n)
+    return fid
 
 
 def dump_run_to_filenode_sync(run_id: str, project_id: Optional[str]) -> Optional[str]:

@@ -35,9 +35,11 @@ import logging
 from datetime import datetime, timezone
 from typing import Any, Optional
 
+import uuid
+
 from sqlalchemy.orm import Session
 
-from .models import Project
+from .models import FileNode, Project
 
 logger = logging.getLogger(__name__)
 
@@ -211,14 +213,20 @@ class PlanSnapshotState:
         }
 
     def flush(self, db: Session) -> None:
-        """UPSERT 到 Project.plan_snapshot_json。容错：失败不抛。"""
+        """UPSERT 到 Project.plan_snapshot_json + 同步镜像到 「AI 输出/项目计划.md」。容错：失败不抛。"""
         if not self._dirty:
             return
         try:
             proj = db.get(Project, self.project_id)
             if not proj:
                 return
-            proj.plan_snapshot_json = self.to_dict()
+            snap_dict = self.to_dict()
+            proj.plan_snapshot_json = snap_dict
+            # 同步镜像到人可读 markdown（员工/admin 在文件树就能看进度）
+            try:
+                mirror_plan_to_markdown(db, self.project_id, snap_dict, project_title=proj.title)
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("plan markdown mirror failed: %s", exc)
             db.commit()
             self._dirty = False
         except Exception as exc:  # noqa: BLE001
@@ -240,6 +248,185 @@ class PlanSnapshotState:
             self._artifact_buffer.clear()
             self._dirty = True
         self.flush(db)
+
+
+# ─── 镜像到「AI 输出/项目计划.md」 ──────────────────────────────────────
+
+
+_PLAN_MD_NAME = "项目计划.md"
+_AI_FOLDER_NAME = "AI 输出"
+_STATUS_ICON = {
+    "completed": "✅",
+    "in_progress": "🔄",
+    "pending": "⬜",
+    "failed": "❌",
+}
+
+
+def _ensure_ai_output_folder(db: Session, project_id: str) -> str | None:
+    """返回 AI 输出 文件夹 FileNode.id；不存在则创建（source='ai', 非 hidden）。"""
+    folder = (
+        db.query(FileNode)
+        .filter(
+            FileNode.project_id == project_id,
+            FileNode.kind == "folder",
+            FileNode.name == _AI_FOLDER_NAME,
+            FileNode.parent_id.is_(None),
+        )
+        .first()
+    )
+    if folder:
+        return folder.id
+    try:
+        fid = f"d-{uuid.uuid4().hex[:10]}"
+        folder = FileNode(
+            id=fid,
+            project_id=project_id,
+            name=_AI_FOLDER_NAME,
+            kind="folder",
+            parent_id=None,
+            source="ai",
+            hidden=False,
+        )
+        db.add(folder)
+        db.flush()
+        return fid
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("create AI 输出 folder failed: %s", exc)
+        return None
+
+
+def _resolve_file_path(db: Session, project_id: str, fid: str) -> str | None:
+    node = (
+        db.query(FileNode)
+        .filter(FileNode.project_id == project_id, FileNode.id == fid)
+        .first()
+    )
+    if not node:
+        return None
+    parts = [node.name]
+    cur = node
+    for _ in range(5):
+        if not cur.parent_id:
+            break
+        parent = db.get(FileNode, cur.parent_id)
+        if not parent:
+            break
+        parts.insert(0, parent.name)
+        cur = parent
+    return "/".join(parts)
+
+
+def _render_plan_markdown(snap: dict, project_title: str, file_paths_by_id: dict[str, str]) -> str:
+    steps = snap.get("steps") or []
+    total = len(steps)
+    done = sum(1 for s in steps if s.get("status") == "completed")
+    failed = sum(1 for s in steps if s.get("status") == "failed")
+    cur = next((s for s in steps if s.get("status") == "in_progress"), None)
+    lines: list[str] = []
+    lines.append(f"# 项目计划 — {project_title}")
+    lines.append("")
+    lines.append(
+        f"> 进度 **{done} / {total}** · 失败 {failed} · 更新时间 {snap.get('updated_at','')}"
+    )
+    if cur:
+        lines.append(f"> 当前进行中：**{cur.get('title','')}**（{cur.get('id','')}）")
+    lines.append("")
+    lines.append("---")
+    lines.append("")
+    lines.append("## 步骤")
+    lines.append("")
+    for s in steps:
+        icon = _STATUS_ICON.get(s.get("status", "pending"), "⬜")
+        sid = s.get("id", "?")
+        title = s.get("title", "")
+        lines.append(f"### {icon} [{sid}] {title}")
+        ts_parts = []
+        if s.get("started_at"):
+            ts_parts.append(f"开始 {s['started_at']}")
+        if s.get("completed_at"):
+            ts_parts.append(f"完成 {s['completed_at']}")
+        if ts_parts:
+            lines.append(f"<small>{' · '.join(ts_parts)}</small>")
+        if s.get("artifact_summary"):
+            lines.append("")
+            lines.append(f"**小结**：{s['artifact_summary']}")
+        # 产出文件链接
+        artifacts: list[str] = []
+        for fid in (s.get("artifact_file_ids") or []):
+            path = file_paths_by_id.get(fid)
+            if path:
+                artifacts.append(path)
+        artifacts.extend(s.get("artifact_file_paths") or [])
+        artifacts = list(dict.fromkeys(artifacts))   # 去重保序
+        if artifacts:
+            lines.append("")
+            lines.append("**产出**：")
+            for p in artifacts:
+                lines.append(f"- `{p}`")
+        lines.append("")
+    lines.append("---")
+    lines.append("")
+    lines.append("> 本文件由 AI 自动维护，每次更新计划同步覆盖。")
+    return "\n".join(lines)
+
+
+def mirror_plan_to_markdown(
+    db: Session, project_id: str, snap: dict, *, project_title: str = "",
+) -> str | None:
+    """把当前 plan_snapshot 渲染成 markdown，写到「AI 输出/项目计划.md」（覆盖式）。
+
+    幂等：同 project 重复调用只 update 一个 FileNode；不创建多份。
+    """
+    parent_id = _ensure_ai_output_folder(db, project_id)
+    if not parent_id:
+        return None
+    # 解析 artifact_file_ids → 路径，给 markdown 渲染用
+    all_ids: set[str] = set()
+    for s in (snap.get("steps") or []):
+        for fid in (s.get("artifact_file_ids") or []):
+            all_ids.add(fid)
+    paths: dict[str, str] = {}
+    if all_ids:
+        for fid in all_ids:
+            p = _resolve_file_path(db, project_id, fid)
+            if p:
+                paths[fid] = p
+    content = _render_plan_markdown(snap, project_title or project_id, paths)
+    size = len(content.encode("utf-8"))
+
+    existing = (
+        db.query(FileNode)
+        .filter(
+            FileNode.project_id == project_id,
+            FileNode.parent_id == parent_id,
+            FileNode.name == _PLAN_MD_NAME,
+        )
+        .first()
+    )
+    if existing:
+        existing.content = content
+        existing.size = size
+        existing.mime = "text/markdown"
+        db.flush()
+        return existing.id
+    fid = f"f-{uuid.uuid4().hex[:10]}"
+    node = FileNode(
+        id=fid,
+        project_id=project_id,
+        name=_PLAN_MD_NAME,
+        kind="file",
+        parent_id=parent_id,
+        source="ai",
+        hidden=False,
+        readonly=False,
+        mime="text/markdown",
+        content=content,
+        size=size,
+    )
+    db.add(node)
+    db.flush()
+    return fid
 
 
 # ─── /resume 端点用：把已完成 / 未完成 steps 总结成 prompt 头 ──────────

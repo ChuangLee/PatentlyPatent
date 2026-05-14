@@ -787,6 +787,16 @@ async def _do_file_write_section(
             "content": [{"type": "text", "text": "name 为空，无法写入"}],
             "isError": True,
         }
+    # 项目计划.md 是 update_plan 工具的镜像产物，禁止用 file_write_section 直写
+    _norm = name.strip().rstrip(".md")
+    if _norm in ("项目计划", "工作计划"):
+        return {
+            "content": [{
+                "type": "text",
+                "text": "禁止直接写「项目计划.md」—— 请用 update_plan 工具更新计划，后端会自动镜像。",
+            }],
+            "isError": True,
+        }
 
     def _sync_write() -> dict:
         from .db import SessionLocal

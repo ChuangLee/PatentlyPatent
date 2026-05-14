@@ -34,7 +34,7 @@ from ..db import SessionLocal, get_db
 from ..mining import build_prior_art_section_legacy, _DOMAIN_LABEL
 from ..models import AgentEvent, AgentRun, AgentRunLog, FileNode, Project
 from ..plan_snapshot import PlanSnapshotState
-from ..run_archive import dump_run_to_filenode_sync, feed_plan_snapshot
+from ..run_archive import dump_and_purge_events_sync, feed_plan_snapshot, read_run_events_sync
 
 logger = logging.getLogger(__name__)
 
@@ -213,18 +213,11 @@ async def interview_resume(project_id: str):
                 for r in rows:
                     paths[r.id] = _resolve_path(db, project_id, r)
             history_seq = int(snap.get("history_event_seq") or 0)
-            history_events = (
-                db.query(AgentEvent)
-                .filter(
-                    AgentEvent.run_id == snap.get("run_id"),
-                    AgentEvent.seq <= history_seq,
-                )
-                .order_by(AgentEvent.seq.asc())
-                .all()
-            ) if snap.get("run_id") else []
-            condensed_history = _condense_events([
-                {"seq": e.seq, "payload": e.payload} for e in history_events
-            ])
+            # 历史事件统一从 read_run_events_sync 读：优先 .ai-internal/_runs/{run_id}.jsonl，
+            # fallback AgentEvent 表（run 还没 dump 的运行中场景）。
+            all_rows = read_run_events_sync(project_id, snap.get("run_id") or "")
+            history_events = [r for r in all_rows if int(r.get("seq", 0)) <= history_seq]
+            condensed_history = _condense_events(history_events)
             resume_head = summarize_for_resume(snap, file_paths_by_id=paths)
             return {
                 "resume_head": resume_head,
@@ -443,7 +436,7 @@ async def _interview_sse_response(
                     num_turns=total_turns or None,
                     error=last_error,
                 )
-                dump_run_to_filenode_sync(run_id, project_id)
+                dump_and_purge_events_sync(run_id, project_id)
             try:
                 await asyncio.to_thread(_finalize)
             except Exception:  # noqa: BLE001
@@ -1246,9 +1239,9 @@ async def _run_mining_in_background(
             except Exception as _exc:  # noqa: BLE001
                 logger.warning("plan_snapshot finalize failed: %s", _exc)
         try:
-            await asyncio.to_thread(dump_run_to_filenode_sync, run_id, project_id)
+            await asyncio.to_thread(dump_and_purge_events_sync, run_id, project_id)
         except Exception as _exc:  # noqa: BLE001
-            logger.warning("dump_run_to_filenode failed: %s", _exc)
+            logger.warning("dump_and_purge_events failed: %s", _exc)
         # 兼容老 AgentRunLog
         try:
             duration_ms = int((time.monotonic() - t0) * 1000)
@@ -1360,6 +1353,10 @@ def get_run_events(
     since: int = Query(0, ge=0),
     db: Session = Depends(get_db),
 ):
+    """读 run 历史 events。run 还在跑 → 走 DB；run 已终态 → 自动 fallback 到 jsonl 文件。"""
+    run_row = db.get(AgentRun, run_id)
+    pid = run_row.project_id if run_row else None
+    # 优先 DB（run 运行中或刚结束未 dump）；DB 为空 + 终态时自动落到 jsonl
     rows = (
         db.query(AgentEvent)
         .filter(AgentEvent.run_id == run_id, AgentEvent.seq > since)
@@ -1367,15 +1364,20 @@ def get_run_events(
         .limit(2000)
         .all()
     )
-    return [
-        {
-            "seq": r.seq,
-            "type": r.type,
-            "payload": r.payload,
-            "created_at": r.created_at.isoformat() if r.created_at else None,
-        }
-        for r in rows
-    ]
+    if rows:
+        return [
+            {
+                "seq": r.seq,
+                "type": r.type,
+                "payload": r.payload,
+                "created_at": r.created_at.isoformat() if r.created_at else None,
+            }
+            for r in rows
+        ]
+    # DB 空：读 jsonl FileNode
+    if pid:
+        return read_run_events_sync(pid, run_id, since=since)
+    return []
 
 
 @router.post("/runs/{run_id}/cancel")
